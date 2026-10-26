@@ -149,9 +149,9 @@ as HTTP 200.
 | `multi_model_ai.py` | `model_health`, `omniroute_client` | `create_longform`, `create_short`, `model_health`, `script_studio`, `topic_selector`, `trend_research`, `visual_assets` | CLI + imports | `app/core/ai.py` |
 | `model_health.py` | `multi_model_ai`, `omniroute_client` | `multi_model_ai` | CLI probe; reads `model_health.json` | `app/core/model_health.py` |
 | `omniroute_client.py` | — | `model_health`, `multi_model_ai` | import only | `app/core/ai.py` |
-| `ollama_chat.py` | — | — | CLI only (`multi_model_ai` talks to Ollama over HTTP itself) | archive candidate |
-| `logging_config.py` | stdlib only | — | none found | `app/core/logging.py` if wired |
-| `resilience.py` | stdlib only | — | none found | `app/core/resilience.py` if wired |
+| `ollama_chat.py` | — | — | CLI only (`multi_model_ai` talks to Ollama over HTTP itself) | archived in `archive/optional-cli/` |
+| `logging_config.py` | stdlib only | — | none found | archived in `archive/unused-infra/` |
+| `resilience.py` | stdlib only | — | none found | archived in `archive/unused-infra/` |
 
 ### 5.2 Research
 
@@ -212,8 +212,8 @@ Phase 6 should merge the package, not the logic.
 | `facebook_reels_upload.py` | — | — | subprocess from `publish_all` | `app/publish/facebook.py` |
 | `instagram_reels_upload.py` | stdlib only | `publish_all` | import (`public_video_url`) + subprocess | `app/publish/instagram.py` |
 | `scheduled_publish.py` | `approval_integrity`, `notify_status` | — | subprocess from `n8n_runner` | `pipelines/publish_scheduled.py` |
-| `publish_social.py` | `approval_integrity`, `publish_all`, `visual_assets` | — | CLI only | archive candidate / optional integrations |
-| `publish_review_safe.py` | `publish_all` | — | CLI only | archive candidate |
+| `publish_social.py` | `approval_integrity`, `publish_all`, `visual_assets` | — | CLI only | kept; decide in publish split phase |
+| `publish_review_safe.py` | `publish_all` | — | CLI only | archived in `archive/optional-cli/` |
 
 ### 5.7 Orchestration / servers / one-off tools
 
@@ -222,12 +222,12 @@ Phase 6 should merge the package, not the logic.
 | `create_short.py` | `multi_model_ai`, `strong_pipeline`, `topic_research`, `video_archive`, `visual_assets` | — | `run_pipeline.sh` | `pipelines/short.py` |
 | `create_longform.py` | `multi_model_ai`, `topic_research`, `video_archive` | — | `run_longform_pipeline.sh` | `pipelines/longform.py` |
 | `n8n_runner.py` | — | — | Docker CMD / Compose; n8n calls it | `api/main.py` (runner routes) |
-| `server_3000.py` | — | — | manual OAuth | `scripts/` or archive |
-| `auth_server.py` | — | — | manual OAuth | `scripts/` or archive |
-| `server_5678.py` | — | — | manual, but dead | archive candidate |
-| `exchange_token.py` | — | — | CLI only | `scripts/oauth/` |
-| `manual_auth.py` | — | — | CLI only | `scripts/oauth/` |
-| `get_code.py` | — | — | CLI only | `scripts/oauth/` |
+| `server_3000.py` | — | — | manual OAuth | archived in `archive/legacy-oauth/` |
+| `auth_server.py` | — | — | manual OAuth | archived in `archive/legacy-oauth/` |
+| `server_5678.py` | — | — | manual, but dead | archived in `archive/legacy-oauth/` |
+| `exchange_token.py` | — | — | CLI only | archived in `archive/legacy-oauth/` |
+| `manual_auth.py` | — | — | CLI only | archived in `archive/legacy-oauth/` |
+| `get_code.py` | — | — | CLI only | archived in `archive/legacy-oauth/` |
 | `setup_check.py` | — | — | documented manual | `scripts/` |
 | `meta_preflight.py` | — | — | documented manual | `scripts/` |
 | `monetization_tracker.py` | — | — | documented manual | `app/analytics/` |
@@ -298,23 +298,26 @@ imports or keep compatibility shims.
 
 ---
 
-## 8. Duplicate / risk clusters (Phase 3 confirmation needed)
+## 8. Archive decisions (Phase 3, 2026-10-26)
 
-These are **not** being archived now. They need a decision because several are manually
-usable even though no code imports them.
+All archived files keep their history under `archive/` and are documented in
+`archive/README.md`. No active module imports them and no shell script or n8n
+workflow calls them.
 
-1. **YouTube OAuth helpers:** `server_3000.py` (port 3000), `auth_server.py` (port 5000),
+1. **YouTube OAuth helpers — archived** to `archive/legacy-oauth/`:
+   `server_3000.py` (port 3000), `auth_server.py` (port 5000),
    `exchange_token.py`, `manual_auth.py`, `get_code.py`, plus dead `server_5678.py`.
-   No n8n/shell references. Which manual flow do you actually use? Keep that one; archive
-   the rest after confirmation.
-2. **Publish wrappers:** `publish_social.py` (multi-platform, documented in
-   `docs/TOOLING_STACK.md`) and `publish_review_safe.py` (thin wrapper) have no inbound
-   imports and are not called by n8n or shell scripts. Archive candidates, but confirm
-   whether you use them manually.
-3. **Review tools:** `review_ledger.py` has no inbound import; `review_package.json` has
-   no runtime reference. Likely legacy, but leave until Phase 8 migration.
-4. **Unused infrastructure:** `logging_config.py`, `resilience.py`, `ollama_chat.py`.
-   No inbound import and no CLI wiring found. Either wire them into `app/core/` or archive.
+   The OAuth callback in use is n8n's port 5678; `youtube_token.json` already exists.
+   The helpers keep absolute paths, so they still run directly from `archive/` if a
+   manual re-auth is ever needed.
+2. **Publish wrappers:** `publish_review_safe.py` archived to
+   `archive/optional-cli/`. `publish_social.py` stays for now because it is documented
+   in `docs/TOOLING_STACK.md` and checked by `setup_check.py`; decide in the publish
+   split phase.
+3. **Review tools:** `review_ledger.py` stays because `topic_selector` still reads
+   `feedback_ledger.csv`; `review_package.json` is a generated artifact in `data/`.
+4. **Unused infrastructure — archived:** `logging_config.py`, `resilience.py` to
+   `archive/unused-infra/`; `ollama_chat.py` to `archive/optional-cli/`.
 5. **Not duplicates — keep separate:** `youtube_upload.py` (short) vs
    `youtube_longform_upload.py` (long); `voice_guide.py` (copy guidance) vs
    `voice_provider.py` (TTS); `topic_research`/`trend_research` (sources) vs
@@ -324,13 +327,14 @@ usable even though no code imports them.
 
 ## 9. Restructure risks
 
-- **Hardcoded repo root** in `auth_server.py`, `exchange_token.py`, `get_code.py`,
-  `manual_auth.py`, `notify_review.py`, `server_3000.py`, `server_5678.py`,
-  `visual_assets.py`, `run_gen.sh`, `restore_n8n_workflow.sh`, and `compose.yaml`.
+- **Hardcoded repo root** in the archived OAuth helpers under `archive/legacy-oauth/`,
+  plus `notify_review.py`, `visual_assets.py`, `run_gen.sh`, `restore_n8n_workflow.sh`,
+  and `compose.yaml`.
   Centralize behind `app/config.py` in the applicable phase; update Compose
   `STUDIO_ROOT`/bind mount together.
-- **BOM at start of file:** `logging_config.py`, `resilience.py` (`U+FEFF`). AST parsing
-  failed until read with `utf-8-sig`; strip BOM when moving.
+- **BOM at start of file:** archived `archive/unused-infra/logging_config.py` and
+  `resilience.py` (`U+FEFF`). AST parsing failed until read with `utf-8-sig`; strip
+  BOM if they are restored.
 - **Move/import coupling:** tests and pipeline modules import top-level names. Do not move
   a module without updating every importer (tables above) or adding a temporary shim.
 - **Runner paths:** `n8n_runner.py` checks for `run_scheduled_generation.sh` and
