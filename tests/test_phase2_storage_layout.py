@@ -11,9 +11,9 @@ import approve_review
 import model_health
 import multi_model_ai
 import review_bundle
-import topic_selector
-import trend_research
 import workspace_sync
+from app.research import selector as topic_selector
+from app.research import trends as trend_research
 
 ROOT = Path(__file__).resolve().parents[1]
 

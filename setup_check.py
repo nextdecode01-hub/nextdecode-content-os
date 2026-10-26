@@ -23,6 +23,12 @@ def command_available(name: str) -> bool:
     bundled = ROOT / "venv" / "bin" / name
     return bundled.exists() or bundled.with_suffix(".exe").exists()
 
+def module_available(name: str) -> bool:
+    try:
+        return importlib.util.find_spec(name) is not None
+    except (ImportError, ModuleNotFoundError):
+        return False
+
 checks: list[tuple[str, bool, str, bool]] = []
 def add(label: str, ready: bool, required: str, *, optional: bool = False) -> None:
     checks.append((label, bool(ready), required, optional))
@@ -35,7 +41,7 @@ add(
 for command in ("ffmpeg", "ffprobe", "edge-tts"):
     add(f"Command: {command}", command_available(command), f"Install {command} in WSL")
 for module in ("requests", "dotenv", "faster_whisper"):
-    add(f"Python module: {module}", importlib.util.find_spec(module) is not None, f"Install {module} in the project virtual environment")
+    add(f"Python module: {module}", module_available(module), f"Install {module} in the project virtual environment")
 
 add("YouTube client ID", bool(env_value("YOUTUBE_CLIENT_ID")), "Set YOUTUBE_CLIENT_ID in .env")
 add("YouTube client secret", bool(env_value("YOUTUBE_CLIENT_SECRET")), "Set YOUTUBE_CLIENT_SECRET in .env")
@@ -55,12 +61,12 @@ add(
 )
 
 # New modules importable
-for module in ("visual_assets", "voice_provider", "trend_research", "publish_social", "workspace_sync", "analytics_collect"):
-    add(f"Python module: {module}", importlib.util.find_spec(module) is not None, f"Install {module} in the project virtual environment")
+for module in ("visual_assets", "voice_provider", "app.research.trends", "publish_social", "workspace_sync", "analytics_collect"):
+    add(f"Python module: {module}", module_available(module), f"Install {module} in the project virtual environment")
 
 # Strong pipeline modules
-for module in ("topic_selector", "research_desk", "script_studio", "voice_guide", "motion_director", "motion_render", "stock_fetcher", "model_health", "strong_pipeline"):
-    add(f"Strong pipeline: {module}", importlib.util.find_spec(module) is not None, f"Install {module} in the project virtual environment")
+for module in ("app.research.selector", "app.research.desk", "script_studio", "voice_guide", "motion_director", "motion_render", "stock_fetcher", "model_health", "strong_pipeline"):
+    add(f"Strong pipeline: {module}", module_available(module), f"Install {module} in the project virtual environment")
 
 add(
     "Strong pipeline: provider health",

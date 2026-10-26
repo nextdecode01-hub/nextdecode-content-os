@@ -19,7 +19,7 @@ from urllib.parse import urlparse
 
 import requests
 from dotenv import load_dotenv
-from topic_research import discover_topics, search_related_news
+from app.research.topics import discover_topics, search_related_news
 import multi_model_ai
 from video_archive import archive_video
 

@@ -11,7 +11,7 @@ import json
 import random
 import re
 from datetime import datetime, timezone
-from topic_research import discover_topics
+from app.research.topics import discover_topics
 import argparse
 import subprocess
 from pathlib import Path

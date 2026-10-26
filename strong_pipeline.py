@@ -21,11 +21,11 @@ from typing import Any
 
 import motion_director
 import motion_render
-import research_desk
 import script_studio
-import topic_selector
 import voice_provider
-from topic_research import discover_topics
+from app.research import desk as research_desk
+from app.research import selector as topic_selector
+from app.research.topics import discover_topics
 
 ROOT = Path(__file__).resolve().parent
 DEFAULT_CANDIDATE_LIMIT = 12

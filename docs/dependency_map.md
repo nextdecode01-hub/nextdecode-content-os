@@ -157,14 +157,15 @@ as HTTP 200.
 
 | Module | Imports | Imported by | Trigger | Target |
 |---|---|---|---|---|
-| `topic_research.py` | — | `create_longform`, `create_short`, `research_desk`, `strong_pipeline`, `topic_selector` | CLI + imports | `app/research/topic.py` |
-| `trend_research.py` | `multi_model_ai` | `topic_selector` | CLI + import | `app/research/trend.py` |
-| `topic_selector.py` | `analytics_collect`, `multi_model_ai`, `topic_research`, `trend_research`, `visual_assets` | `strong_pipeline` | CLI + import | `app/research/selector.py` |
-| `research_desk.py` | `topic_research` | `strong_pipeline` | CLI + import | `app/research/desk.py` |
-| `analytics_collect.py` | — | `topic_selector` | CLI + import | `app/analytics/collect.py` |
+| `app/research/topics.py` (was `topic_research.py`) | — | `create_longform`, `create_short`, `app.research.desk`, `strong_pipeline`, `app.research.selector` | imports | moved in Phase 4 |
+| `app/research/trends.py` (was `trend_research.py`) | `multi_model_ai` (dynamic) | `app.research.selector` | imports | moved in Phase 4 |
+| `app/research/selector.py` (was `topic_selector.py`) | `analytics_collect`, `multi_model_ai`, `app.research.topics`, `app.research.trends`, `visual_assets` | `strong_pipeline` | import | moved in Phase 4 |
+| `app/research/desk.py` (was `research_desk.py`) | `app.research.topics` | `strong_pipeline` | import | moved in Phase 4 |
+| `analytics_collect.py` | — | `app.research.selector` | CLI + import | `app/analytics/collect.py` |
 
-`topic_research` and `trend_research` are sources; `topic_selector` composes them. They are
-not duplicates, but they will share one `app/research/` package in Phase 4.
+`app.research.topics` and `app.research.trends` are sources; `app.research.selector` composes
+them and `app.research.desk` reads the chosen sources. The package keeps the original
+logic; only import paths and project-root lookups changed.
 
 ### 5.3 Script / voice
 
@@ -247,11 +248,11 @@ Phase 6 should merge the package, not the logic.
 | `tests/test_n8n_runner.py` | `n8n_runner` |
 | `tests/test_n8n_workflow.py` | — (reads workflow JSON) |
 | `tests/test_phase0_repo_hygiene.py` | — |
-| `tests/test_research_desk.py` | `research_desk` |
+| `tests/test_research_desk.py` | `app.research.desk` |
 | `tests/test_script_studio.py` | `script_studio`, `voice_guide` |
 | `tests/test_setup_check.py` | — (copies `setup_check.py`) |
 | `tests/test_strong_pipeline.py` | `model_health`, `motion_director`, `script_studio`, `stock_fetcher`, `strong_pipeline` |
-| `tests/test_topic_research.py` | `topic_research` |
+| `tests/test_topic_research.py` | `app.research.topics` |
 | `tests/test_visual_quality.py` | `approval_integrity`, `approve_longform`, `approve_review`, `visual_quality` |
 
 All tests import modules from the repo root. Any Phase 4–7 move must either update these
@@ -320,8 +321,8 @@ workflow calls them.
    `archive/unused-infra/`; `ollama_chat.py` to `archive/optional-cli/`.
 5. **Not duplicates — keep separate:** `youtube_upload.py` (short) vs
    `youtube_longform_upload.py` (long); `voice_guide.py` (copy guidance) vs
-   `voice_provider.py` (TTS); `topic_research`/`trend_research` (sources) vs
-   `topic_selector` (composer).
+   `voice_provider.py` (TTS); `app.research.topics`/`app.research.trends` (sources) vs
+   `app.research.selector` (composer).
 
 ---
 

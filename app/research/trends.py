@@ -29,10 +29,10 @@ Public API
 
 CLI
 ---
-``python trend_research.py --list``
-``python trend_research.py --fetch --top 15``
-``python trend_research.py --fetch --json``
-``python trend_research.py --summary``
+``python -m app.research.trends --list``
+``python -m app.research.trends --fetch --top 15``
+``python -m app.research.trends --fetch --json``
+``python -m app.research.trends --summary``
 """
 
 from __future__ import annotations
@@ -57,8 +57,8 @@ from urllib.parse import quote, urlencode
 import requests
 from dotenv import load_dotenv
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-load_dotenv(SCRIPT_DIR / ".env")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(PROJECT_ROOT / ".env")
 
 USER_AGENT = "NextdecodeTrendResearch/1.0 (+https://github.com/nextdecode/shorts-studio)"
 HEADERS = {"User-Agent": USER_AGENT, "Accept-Language": "en-US,en;q=0.9"}
@@ -70,9 +70,9 @@ SAME_SOURCE_MERGE_THRESHOLD = 0.75
 USED_TOPIC_EXCLUDE_SIMILARITY = 0.85
 USED_TOPIC_DEMOTE_SIMILARITY = 0.55
 
-CACHE_PATH = SCRIPT_DIR / "data" / "trend_cache.json"
-HISTORY_PATH = SCRIPT_DIR / "data" / "trend_history.json"
-USED_TOPICS_PATH = SCRIPT_DIR / "data" / "used_topics.txt"
+CACHE_PATH = PROJECT_ROOT / "data" / "trend_cache.json"
+HISTORY_PATH = PROJECT_ROOT / "data" / "trend_history.json"
+USED_TOPICS_PATH = PROJECT_ROOT / "data" / "used_topics.txt"
 
 SOURCES = ["google_trends", "youtube", "tiktok", "reddit", "hackernews",
            "arxiv", "wikipedia", "github", "trendsapi", "x"]

@@ -13,7 +13,7 @@ from urllib.parse import urlencode
 
 import requests
 
-SCRIPT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 HEADERS = {"User-Agent": "NextdecodeShortsStudio/1.0 (daily topic research)"}
 TECH_TERMS = re.compile(
     r"\b(ai|artificial intelligence|machine learning|robot|robotics|startup|technology|tech|"
@@ -166,7 +166,7 @@ def _recent_titles(path: Path):
 
 def discover_topics(used_topics_file: Path | None = None, limit: int = 6):
     """Collect current AI/tech angles; one failed source never blocks other sources."""
-    used = _recent_titles(used_topics_file or (SCRIPT_DIR / "data" / "used_topics.txt"))
+    used = _recent_titles(used_topics_file or (PROJECT_ROOT / "data" / "used_topics.txt"))
     jobs = [_fetch_hacker_news, _fetch_arxiv, _fetch_trends]
     jobs.extend(lambda name=name: _fetch_reddit(name) for name in ("technology", "MachineLearning", "artificial"))
     collected = []

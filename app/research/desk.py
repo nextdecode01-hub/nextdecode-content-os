@@ -14,9 +14,9 @@ from urllib.parse import quote_plus, urlparse
 
 import requests
 
-import topic_research
+from . import topics as topic_research
 
-SCRIPT_NAME = "research_desk.py"
+SCRIPT_NAME = "app/research/desk.py"
 USER_AGENT = "NextdecodeShortsResearchDesk/1.0"
 DEFAULT_TIMEOUT = 25
 DEFAULT_MAX_CHARS = 12000

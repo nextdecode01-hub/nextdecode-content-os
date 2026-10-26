@@ -4,11 +4,12 @@ Research-led vertical videos for Nextdecode. The full pipeline researches curren
 
 ## Project files
 
-- topic_research.py — topic discovery and repeat avoidance.
+- app/research/topics.py — topic discovery and repeat avoidance.
+- app/research/trends.py — multi-source trending-topic discovery and heat ranking.
 - create_short.py — script, voiceover, B-roll, subtitles, render, and quality checks.
 - strong_pipeline.py — the strong editorial chain that `create_short.py --quality strong` runs.
-- topic_selector.py — scores candidate topics on seven editorial dimensions and picks the best one.
-- research_desk.py — fetches and actually reads the sources, extracts verbatim claims, flags unsupported numbers and contradictions.
+- app/research/selector.py — scores candidate topics on seven editorial dimensions and picks the best one.
+- app/research/desk.py — fetches and actually reads the sources, extracts verbatim claims, flags unsupported numbers and contradictions.
 - script_studio.py — generates hook candidates, scores them, writes a beat sheet, and runs a critic loop that rewrites until the script passes.
 - voice_guide.py — hook archetypes, channel voice, and the AI-slop ban list.
 - motion_director.py — plans the edited shot list (cuts, zoom, SFX, safe zones).

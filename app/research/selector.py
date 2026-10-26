@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Editorial topic selection for Nextdecode.
 
-`topic_research.py` and `trend_research.py` discover *what is happening*.
+`app/research/topics.py` and `app/research/trends.py` discover *what is happening*.
 This module decides *what we should make*: it scores every candidate on seven
 weighted dimensions and picks the single best topic for the channel.
 
@@ -44,7 +44,7 @@ from typing import Any
 import requests
 from dotenv import load_dotenv
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(ROOT / ".env", override=True)
 
 # --------------------------------------------------------------------------- #
@@ -247,7 +247,7 @@ def _similarity(left: str, right: str) -> float:
 
 def _tech_terms() -> re.Pattern:
     try:
-        from topic_research import TECH_TERMS  # type: ignore
+        from app.research.topics import TECH_TERMS  # type: ignore
 
         return TECH_TERMS
     except Exception:
@@ -1835,7 +1835,7 @@ def _demo_candidates(limit: int = 8) -> tuple[list[dict], list[str]]:
     notes: list[str] = []
     candidates: list[dict] = []
     try:
-        import trend_research
+        from app.research import trends as trend_research
 
         fetched = trend_research.fetch_all()
         errors = fetched.get("errors") or {}
@@ -1850,7 +1850,7 @@ def _demo_candidates(limit: int = 8) -> tuple[list[dict], list[str]]:
     except Exception as exc:
         notes.append(f"trend_research unavailable: {_redact(type(exc).__name__)}")
     try:
-        from topic_research import discover_topics
+        from app.research.topics import discover_topics
 
         extra = discover_topics(ROOT / "data" / "used_topics.txt", limit=4)
         candidates.extend(extra)

@@ -2,7 +2,7 @@ import unittest
 from datetime import datetime, timezone
 from unittest.mock import patch
 
-import topic_research
+from app.research import topics as topic_research
 
 
 class FeedResponse:
@@ -57,7 +57,7 @@ class TopicResearchTests(unittest.TestCase):
           <pubDate>Wed, 22 Oct 2026 10:00:00 GMT</pubDate>
           <source>Example News</source>
         </item></channel></rss>"""
-        with patch("topic_research._get", return_value=FeedResponse(feed)) as get:
+        with patch("app.research.topics._get", return_value=FeedResponse(feed)) as get:
             results = topic_research.search_related_news("AI consensus paper")
 
         self.assertEqual(len(results), 1)

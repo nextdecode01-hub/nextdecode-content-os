@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-import research_desk
+from app.research import desk as research_desk
 
 
 class DummyResponse:
