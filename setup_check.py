@@ -61,7 +61,7 @@ add(
 )
 
 # New modules importable
-for module in ("visual_assets", "voice_provider", "app.research.trends", "publish_social", "workspace_sync", "analytics_collect"):
+for module in ("visual_assets", "app.voice.provider", "app.research.trends", "publish_social", "workspace_sync", "analytics_collect"):
     add(f"Python module: {module}", module_available(module), f"Install {module} in the project virtual environment")
 
 # Strong pipeline modules

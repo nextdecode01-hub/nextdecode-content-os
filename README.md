@@ -13,6 +13,7 @@ Research-led vertical videos for Nextdecode. The full pipeline researches curren
 - app/script/studio.py — generates hook candidates, scores them, writes a beat sheet, and runs a critic loop that rewrites until the script passes.
 - app/script/voice_guide.py — hook archetypes, channel voice, and the AI-slop ban list.
 - app/script/longform.py — research-backed long-form topic selection, source validation, and script generation.
+- app/voice/provider.py — pluggable TTS chain (Edge TTS → ElevenLabs → Cartesia → OpenAI → silent).
 - motion_director.py — plans the edited shot list (cuts, zoom, SFX, safe zones).
 - motion_render.py — renders the multi-shot video with Ken Burns motion, kinetic captions, music bed and SFX.
 - stock_fetcher.py — key-free real-photo sourcing from Wikimedia Commons with licence attribution.
@@ -38,7 +39,7 @@ The live npm workflow is n8n workflow `aibl9NX61mKH9z5m`, named **NEXTDECODE - F
 
 `create_short.py --quality strong` (the default) runs the full editorial chain instead of the legacy single-pass path:
 
-    topic_selector  ->  research_desk  ->  script_studio  ->  voice_provider
+    topic_selector  ->  research_desk  ->  script_studio  ->  app.voice.provider
                    ->  motion_director  ->  motion_render  ->  QA
 
 | Stage | What it does | Fails closed when |
@@ -46,7 +47,7 @@ The live npm workflow is n8n workflow `aibl9NX61mKH9z5m`, named **NEXTDECODE - F
 | `topic_selector` | Scores candidate topics on demand, channel fit, visual feasibility, undersaturation, novelty, timing and risk, and applies the analytics feedback loop. | No candidate clears `min_topic_score` (default 55). |
 | `research_desk` | Fetches the candidate sources, reads them, keeps only pages that are actually about the topic, and extracts claims with verbatim quotes. | The primary source cannot be fetched or no verifiable claim exists. |
 | `script_studio` | Generates one hook per archetype, scores them, writes a timestamped beat sheet, then runs a critic loop that rewrites the script while it contains unsupported numbers, slop, a generic hook, or a wrong word count. | The script still fails the critic after the rewrite budget. |
-| `voice_provider` | Speaks the script through the TTS chain. | No provider produced audio. |
+| `app.voice.provider` | Speaks the script through the TTS chain. | No provider produced audio. |
 | `motion_director` | Cuts the runtime into 8–14 shots (about 2.8 s each) with zoom, pan, SFX and safe zones. | — |
 | `motion_render` | Renders every shot with Ken Burns motion, burns kinetic word-level captions, mixes a music bed under the voice, and adds SFX. | The render fails QA. |
 | `qa_video` | Re-probes the finished file. | Wrong resolution, missing audio, or a duration that does not match the voice track. |

@@ -22,7 +22,7 @@ from typing import Any
 import motion_director
 import motion_render
 from app.script import studio as script_studio
-import voice_provider
+from app.voice import provider as voice_provider
 from app.research import desk as research_desk
 from app.research import selector as topic_selector
 from app.research.topics import discover_topics

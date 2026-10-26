@@ -174,11 +174,11 @@ logic; only import paths and project-root lookups changed.
 | `app/script/studio.py` (was `script_studio.py`) | `multi_model_ai`, `app.script.voice_guide` | `strong_pipeline` | CLI + import | moved in Phase 5 |
 | `app/script/voice_guide.py` (was `voice_guide.py`) | — | `app.script.studio` | CLI + import | moved in Phase 5 |
 | `app/script/longform.py` (extracted from `create_longform.py`) | `multi_model_ai`, `app.research.topics` | `create_longform` | import | moved in Phase 5 |
-| `voice_provider.py` | — | `strong_pipeline` | CLI + import | `app/voice/provider.py` |
-| `strong_pipeline.py` | `app.research.desk`, `app.research.selector`, `app.research.topics`, `app.script.studio`, `motion_director`, `motion_render`, `voice_provider` | `create_short` | `run_gen.sh`; imported by `create_short` | `app/script/pipeline.py` |
+| `app/voice/provider.py` (was `voice_provider.py`) | — | `strong_pipeline` | CLI + import | moved in Phase 6 |
+| `strong_pipeline.py` | `app.research.desk`, `app.research.selector`, `app.research.topics`, `app.script.studio`, `app.voice.provider`, `motion_director`, `motion_render` | `create_short` | `run_gen.sh`; imported by `create_short` | `app/script/pipeline.py` |
 
-`app.script.voice_guide` is editorial prompt/copy guidance, not TTS. `voice_provider.py` is TTS.
-Phase 6 should merge the package, not the logic. `create_longform.py` keeps only visual/render
+`app.script.voice_guide` is editorial prompt/copy guidance, not TTS. `app.voice.provider` is TTS.
+Phase 6 merges the package only; the two modules stay separate. `create_longform.py` keeps only visual/render
 helpers after Phase 5; script research and generation live in `app.script.longform`.
 
 ### 5.4 Visuals / render
@@ -254,6 +254,8 @@ helpers after Phase 5; script research and generation live in `app.script.longfo
 | `tests/test_script_studio.py` | `app.script.studio`, `app.script.voice_guide` |
 | `tests/test_setup_check.py` | — (copies `setup_check.py`) |
 | `tests/test_strong_pipeline.py` | `app.script.studio`, `model_health`, `motion_director`, `stock_fetcher`, `strong_pipeline` |
+| `tests/test_phase5_script_package.py` | `app.script.longform`, `app.script.studio`, `app.script.voice_guide`, `create_longform` |
+| `tests/test_phase6_voice_package.py` | `app.voice.provider`, `strong_pipeline` |
 | `tests/test_topic_research.py` | `app.research.topics` |
 | `tests/test_visual_quality.py` | `approval_integrity`, `approve_longform`, `approve_review`, `visual_quality` |
 
@@ -292,7 +294,7 @@ imports or keep compatibility shims.
 | `longform_voice.mp3`, `longform_subtitles.ass`, `longform_background.mp4` | `create_longform` | `outputs/` |
 | `longform_script.txt` | `create_longform` | `data/` |
 | `token_usage.json` | `multi_model_ai` | `data/` |
-| `tts_output.mp3`, `voice.mp3`, `subtitles.ass`, `background.mp4` | `voice_provider`, `strong_pipeline`, `create_short` | `outputs/` |
+| `tts_output.mp3`, `voice.mp3`, `subtitles.ass`, `background.mp4` | `app.voice.provider`, `strong_pipeline`, `create_short` | `outputs/` |
 | `shots/`, `media/`, `videos/`, `output/audio/` | generated assets | `outputs/` |
 | archived videos | `video_archive` | `outputs/archive/` (or `VIDEO_ARCHIVE_DIR`) |
 | `.scheduled_generation.lock` | `flock` in `run_scheduled_generation.sh` | replace with PID+timestamp lock |
@@ -366,7 +368,7 @@ workflow calls them.
 | 3 | OAuth duplicate cluster, `publish_social`, `publish_review_safe`, `review_ledger`, `ollama_chat`, `server_5678` | confirm before archiving; no deletions |
 | 4 | `topic_research`, `trend_research`, `topic_selector`, `research_desk`, `analytics_collect` | preserve public functions used by `strong_pipeline` |
 | 5 | `create_short`, `create_longform`, `strong_pipeline`, `script_studio` | single entrypoints `pipelines/short.py`, `pipelines/longform.py`; preserve CLI args |
-| 6 | `voice_guide`, `voice_provider` | package merge only; guidance vs TTS stay separate |
+| 6 | `voice_guide`, `voice_provider` | moved to `app/script/voice_guide.py` and `app/voice/provider.py`; guidance vs TTS stay separate |
 | 7 | `publish_all`, `youtube_upload`, `youtube_longform_upload`, `facebook_reels_upload`, `instagram_reels_upload` | split `app/publish/youtube.py`, `facebook.py`, `instagram.py`; keep subprocess/exit-code contract |
 | 8 | all JSON ledgers + `workspace_sync.workspace.db` | migration script; keep JSON files until verified |
 | 9 | `n8n_runner`, `server_3000`, `auth_server` | preserve n8n `:8080/run/*`; decide OAuth callback ports |
