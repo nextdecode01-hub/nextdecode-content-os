@@ -331,7 +331,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run the strong editorial pipeline")
     parser.add_argument("--topic", default="", help="Force a specific topic")
     parser.add_argument("--seconds", type=int, default=35)
-    parser.add_argument("--work-dir", default=str(ROOT))
+    parser.add_argument("--work-dir", default=str(ROOT / "outputs"))
     parser.add_argument("--min-topic-score", type=int, default=DEFAULT_MIN_TOPIC_SCORE)
     parser.add_argument("--out", default="", help="Write the metadata JSON here")
     args = parser.parse_args(argv)
@@ -342,7 +342,8 @@ def main(argv: list[str] | None = None) -> int:
         work_dir=Path(args.work_dir),
         min_topic_score=args.min_topic_score,
     )
-    out_path = Path(args.out) if args.out else Path(args.work_dir) / "metadata_strong.json"
+    out_path = Path(args.out) if args.out else ROOT / "data" / "metadata_strong.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({
         "status": "success",

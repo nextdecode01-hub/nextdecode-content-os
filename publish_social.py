@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import requests
 
 ROOT = Path(__file__).resolve().parent
-LEDGER = ROOT / "social_upload_ledger.json"
+LEDGER = ROOT / "data" / "social_upload_ledger.json"
 PLATFORMS = {}
 _META_VERSION = os.getenv("META_GRAPH_API_VERSION", "v19.0").strip() or "v19.0"
 _bsky_session = {}
@@ -491,7 +491,7 @@ def publish_all_social(video_path, caption, title=None, platforms=None, hashtags
     if require_approval:
         try:
             import approval_integrity
-            approval_file = ROOT / "review_approved.json"
+            approval_file = ROOT / "data" / "review_approved.json"
             approval = json.loads(approval_file.read_text()) if approval_file.exists() else {}
             err = None
             try:

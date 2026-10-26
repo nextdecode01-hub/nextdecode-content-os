@@ -10,9 +10,9 @@ from approval_integrity import sha256_file
 from visual_quality import has_publishable_visuals
 
 ROOT = Path(__file__).resolve().parent
-METADATA = ROOT / "metadata.json"
-VIDEO = ROOT / "output_short.mp4"
-QUEUE = ROOT / "review_queue"
+METADATA = ROOT / "data" / "metadata.json"
+VIDEO = ROOT / "outputs" / "output_short.mp4"
+QUEUE = ROOT / "data" / "review_queue"
 
 def slug(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")[:60] or "untitled"
@@ -26,7 +26,7 @@ def main() -> int:
         stamp = datetime.fromisoformat(created.replace("Z", "+00:00"))
     except ValueError:
         stamp = datetime.now(timezone.utc)
-    QUEUE.mkdir(exist_ok=True)
+    QUEUE.mkdir(parents=True, exist_ok=True)
     filename = f"{stamp.astimezone(timezone.utc).strftime('%Y%m%d-%H%M%S')}-{slug(str(metadata.get('title', 'untitled')))}.json"
     package = {
         "status": "pending_human_review",
@@ -60,7 +60,7 @@ def main() -> int:
     }
     target = QUEUE / filename
     target.write_text(json.dumps(package, indent=2) + "\n", encoding="utf-8")
-    (ROOT / "review_pending.json").write_text(json.dumps({"status": package["status"], "package": str(target), "created_at": package["created_at"]}, indent=2) + "\n", encoding="utf-8")
+    (ROOT / "data" / "review_pending.json").write_text(json.dumps({"status": package["status"], "package": str(target), "created_at": package["created_at"]}, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"status": package["status"], "review_package": str(target), "title": package["title"]}))
     return 0
 

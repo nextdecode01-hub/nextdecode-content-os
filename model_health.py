@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 ROOT = Path(__file__).resolve().parent
-HEALTH_PATH = ROOT / "model_health.json"
+HEALTH_PATH = ROOT / "data" / "model_health.json"
 
 DEFAULT_PROBE_TIMEOUT = 90
 FAILURE_COOLDOWN_HOURS = 6

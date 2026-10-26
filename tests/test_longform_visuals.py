@@ -105,7 +105,7 @@ class LongformVisualTests(unittest.TestCase):
             self.assertEqual(second, hits)
             get.assert_called_once()
             self.assertEqual(get.call_args.args[0], "https://pixabay.com/api/videos/")
-            cache_files = list((Path(temporary) / "videos" / "pixabay_search_cache").glob("*.json"))
+            cache_files = list((Path(temporary) / "outputs" / "videos" / "pixabay_search_cache").glob("*.json"))
             self.assertEqual(len(cache_files), 1)
             self.assertNotIn("private-test-key", cache_files[0].read_text(encoding="utf-8"))
             self.assertEqual(json.loads(cache_files[0].read_text(encoding="utf-8"))["hits"], hits)

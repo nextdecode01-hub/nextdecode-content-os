@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-LEDGER = ROOT / "feedback_ledger.csv"
+LEDGER = ROOT / "data" / "feedback_ledger.csv"
 FIELDS = ["date", "video_number", "title", "content_pillar", "hook", "sources", "demo", "limitation", "hook_score", "evidence_score", "value_score", "visual_score", "pacing_score", "payoff_score", "originality_score", "youtube_24h_views", "youtube_24h_engaged_views", "youtube_7d_views", "instagram_7d_reach", "facebook_7d_reach", "comments", "shares", "saves", "subscribers_gained", "feedback", "next_hypothesis"]
 
 def ensure() -> None:

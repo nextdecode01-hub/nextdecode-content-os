@@ -87,9 +87,9 @@ NEIGHBOUR_BONUS = 8.0
 ANGLE_RESTATES_TITLE = 0.80
 IMAGE_FALLBACK_FLOOR = 55.0
 
-USED_TOPICS_PATH = ROOT / "used_topics.txt"
-ANALYTICS_HISTORY_PATH = ROOT / "analytics_history.json"
-FEEDBACK_LEDGER_PATH = ROOT / "feedback_ledger.csv"
+USED_TOPICS_PATH = ROOT / "data" / "used_topics.txt"
+ANALYTICS_HISTORY_PATH = ROOT / "data" / "analytics_history.json"
+FEEDBACK_LEDGER_PATH = ROOT / "data" / "feedback_ledger.csv"
 
 USER_AGENT = "NextdecodeTopicSelector/1.0 (editorial topic selection)"
 
@@ -1852,7 +1852,7 @@ def _demo_candidates(limit: int = 8) -> tuple[list[dict], list[str]]:
     try:
         from topic_research import discover_topics
 
-        extra = discover_topics(ROOT / "used_topics.txt", limit=4)
+        extra = discover_topics(ROOT / "data" / "used_topics.txt", limit=4)
         candidates.extend(extra)
         notes.append(f"topic_research.discover_topics(): {len(extra)} additional candidate(s)")
     except Exception as exc:

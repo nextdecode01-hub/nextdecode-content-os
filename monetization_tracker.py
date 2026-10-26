@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-STATE = ROOT / "monetization_progress.json"
+STATE = ROOT / "data" / "monetization_progress.json"
 
 DEFAULT = {
     "checked_at": None,

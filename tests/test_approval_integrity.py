@@ -42,8 +42,12 @@ class ApprovalIntegrityTests(unittest.TestCase):
     def test_short_approval_is_invalidated_when_video_changes(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            metadata_file = root / "metadata.json"
-            video_file = root / "output_short.mp4"
+            data_dir = root / "data"
+            output_dir = root / "outputs"
+            data_dir.mkdir()
+            output_dir.mkdir()
+            metadata_file = data_dir / "metadata.json"
+            video_file = output_dir / "output_short.mp4"
             footage = root / "footage.mp4"
             footage.write_bytes(b"licensed-footage")
             visuals = {"mode": "owner_recorded", "asset_count": 1, "asset_path": str(footage)}
@@ -70,7 +74,7 @@ class ApprovalIntegrityTests(unittest.TestCase):
                 "visuals": visuals,
                 **hashes,
             }), encoding="utf-8")
-            (root / "review_approved.json").write_text(json.dumps({
+            (data_dir / "review_approved.json").write_text(json.dumps({
                 "status": "approved",
                 "approved_at": approved_at,
                 "package": str(package_path),

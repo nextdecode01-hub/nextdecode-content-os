@@ -58,7 +58,7 @@ class RunnerHandler(BaseHTTPRequestHandler):
         for mod in ("requests", "dotenv", "faster_whisper"):
             checks[f"py:{mod}"] = importlib.util.find_spec(mod) is not None
 
-        health_file = ROOT / "model_health.json"
+        health_file = ROOT / "data" / "model_health.json"
         checks["model_health_file"] = health_file.is_file()
         if health_file.is_file():
             import json as _json

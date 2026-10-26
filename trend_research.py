@@ -70,9 +70,9 @@ SAME_SOURCE_MERGE_THRESHOLD = 0.75
 USED_TOPIC_EXCLUDE_SIMILARITY = 0.85
 USED_TOPIC_DEMOTE_SIMILARITY = 0.55
 
-CACHE_PATH = SCRIPT_DIR / "trend_cache.json"
-HISTORY_PATH = SCRIPT_DIR / "trend_history.json"
-USED_TOPICS_PATH = SCRIPT_DIR / "used_topics.txt"
+CACHE_PATH = SCRIPT_DIR / "data" / "trend_cache.json"
+HISTORY_PATH = SCRIPT_DIR / "data" / "trend_history.json"
+USED_TOPICS_PATH = SCRIPT_DIR / "data" / "used_topics.txt"
 
 SOURCES = ["google_trends", "youtube", "tiktok", "reddit", "hackernews",
            "arxiv", "wikipedia", "github", "trendsapi", "x"]

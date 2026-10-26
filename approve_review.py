@@ -16,13 +16,13 @@ def main() -> int:
     parser.add_argument("package", nargs="?", help="Path shown in review_pending.json")
     parser.add_argument("--interactive", action="store_true", help="Answer each review checklist question before approving")
     args = parser.parse_args()
-    pending = ROOT / "review_pending.json"
+    pending = ROOT / "data" / "review_pending.json"
     if not pending.exists() and not args.package:
         raise SystemExit("No review_pending.json found")
     package_path = Path(args.package) if args.package else Path(json.loads(pending.read_text(encoding="utf-8"))["package"])
     package = json.loads(package_path.read_text(encoding="utf-8"))
-    metadata_file = ROOT / "metadata.json"
-    video_file = ROOT / "output_short.mp4"
+    metadata_file = ROOT / "data" / "metadata.json"
+    video_file = ROOT / "outputs" / "output_short.mp4"
     metadata = json.loads(metadata_file.read_text(encoding="utf-8"))
     current_hashes = {
         "metadata_sha256": sha256_file(metadata_file),
@@ -58,7 +58,7 @@ def main() -> int:
     package["checklist"]["publish_approved"] = True
     package["approved_at"] = datetime.now(timezone.utc).isoformat()
     package_path.write_text(json.dumps(package, indent=2) + "\n", encoding="utf-8")
-    (ROOT / "review_approved.json").write_text(json.dumps({
+    (ROOT / "data" / "review_approved.json").write_text(json.dumps({
         "status": "approved",
         "package": str(package_path),
         "title": package.get("title", ""),

@@ -24,15 +24,15 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.format == "short":
-        pending = json.loads((ROOT / "review_pending.json").read_text(encoding="utf-8"))
+        pending = json.loads((ROOT / "data" / "review_pending.json").read_text(encoding="utf-8"))
         package = json.loads(Path(pending["package"]).read_text(encoding="utf-8"))
-        video = ROOT / "output_short.mp4"
+        video = ROOT / "outputs" / "output_short.mp4"
         title = package.get("title", "(untitled)")
         approve = "approve_review.py"
         checklist = "sources, key claims, licensed visuals, limitations, full playback, audio/captions, and platform copy"
     else:
-        package = json.loads((ROOT / "longform_review_pending.json").read_text(encoding="utf-8"))
-        video = ROOT / "output_longform.mp4"
+        package = json.loads((ROOT / "data" / "longform_review_pending.json").read_text(encoding="utf-8"))
+        video = ROOT / "outputs" / "output_longform.mp4"
         title = package.get("title", "(untitled)")
         approve = "approve_longform.py"
         checklist = "sources, claims, limitations, full playback, audio/captions, chapters, thumbnail, and licensed visuals"

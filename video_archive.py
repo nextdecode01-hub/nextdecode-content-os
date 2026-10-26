@@ -16,7 +16,7 @@ def _archive_root(project_root: Path) -> Path:
     drive_root = Path("D:/") if os.name == "nt" else Path("/mnt/d")
     if drive_root.is_dir():
         return drive_root / "ShortsStudioVideos"
-    return project_root / "videos"
+    return project_root / "outputs" / "archive"
 
 
 def archive_video(

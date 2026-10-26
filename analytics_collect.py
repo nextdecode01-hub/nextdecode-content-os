@@ -4,8 +4,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT / ".env", override=True)
-HISTORY = ROOT / "analytics_history.json"
-LATEST = ROOT / "analytics_latest.json"
+HISTORY = ROOT / "data" / "analytics_history.json"
+LATEST = ROOT / "data" / "analytics_latest.json"
 
 def env(name):
     v = os.getenv(name, "").strip()
@@ -107,7 +107,7 @@ def collect_youtube_data(video_id=None, days=30):
 
 def _meta_rate():
     # simple per-hour counter stored in file
-    p = ROOT / "meta_rate_counter.json"
+    p = ROOT / "data" / "meta_rate_counter.json"
     now = time.time()
     if p.exists():
         d = json.loads(p.read_text())

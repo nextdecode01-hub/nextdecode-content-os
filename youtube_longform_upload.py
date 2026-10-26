@@ -26,10 +26,10 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"status": "blocked_schedule", "reason": reason}))
         send_status("Nextdecode Studio: the long-form upload was skipped because it ran outside the 20:00 IST hour.")
         return 2
-    approved = ROOT / "longform_review_approved.json"
-    pending = ROOT / "longform_review_pending.json"
-    metadata_file = ROOT / "longform_metadata.json"
-    video_file = ROOT / "output_longform.mp4"
+    approved = ROOT / "data" / "longform_review_approved.json"
+    pending = ROOT / "data" / "longform_review_pending.json"
+    metadata_file = ROOT / "data" / "longform_metadata.json"
+    video_file = ROOT / "outputs" / "output_longform.mp4"
     if not args.scheduled_approved and (os.getenv("PUBLISH_MODE", "review").strip().lower() != "publish" or os.getenv("AUTO_PUBLISH_APPROVED", "false").strip().lower() != "true"):
         print(json.dumps({"status": "blocked_approval", "reason": "Long-form publishing is review-only."}))
         return 2
@@ -61,7 +61,7 @@ def main(argv: list[str] | None = None) -> int:
         return blocked(reason, args.scheduled_approved)
     if package.get("visuals") != data.get("visuals") or not has_publishable_visuals(data.get("visuals")):
         return blocked("Procedural or unverified visuals are draft-only.", args.scheduled_approved, "blocked_quality")
-    ledger_file = ROOT / "uploaded_longform_content.json"
+    ledger_file = ROOT / "data" / "uploaded_longform_content.json"
     ledger = load_upload_ledger(ledger_file)
     fingerprint = hashlib.sha256((str(data.get("title", "")) + "\n" + str(data.get("voice_text", ""))).lower().encode("utf-8")).hexdigest()
     if fingerprint in ledger["fingerprints"]:

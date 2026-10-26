@@ -25,12 +25,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Approve a reviewed long-form Nextdecode package")
     parser.add_argument("--interactive", action="store_true", help="Answer each review checklist question before approving")
     args = parser.parse_args(argv)
-    pending = ROOT / "longform_review_pending.json"
+    pending = ROOT / "data" / "longform_review_pending.json"
     if not pending.exists():
         raise SystemExit("No longform_review_pending.json found")
     package = json.loads(pending.read_text(encoding="utf-8"))
-    metadata_file = ROOT / "longform_metadata.json"
-    video_file = ROOT / "output_longform.mp4"
+    metadata_file = ROOT / "data" / "longform_metadata.json"
+    video_file = ROOT / "outputs" / "output_longform.mp4"
     metadata = json.loads(metadata_file.read_text(encoding="utf-8"))
     current_hashes = {
         "metadata_sha256": sha256_file(metadata_file),
@@ -57,7 +57,7 @@ def main(argv: list[str] | None = None) -> int:
     package["checklist"]["publish_approved"] = True
     package["approved_at"] = datetime.now(timezone.utc).isoformat()
     pending.write_text(json.dumps(package, indent=2) + "\n", encoding="utf-8")
-    (ROOT / "longform_review_approved.json").write_text(json.dumps({
+    (ROOT / "data" / "longform_review_approved.json").write_text(json.dumps({
         "status": "approved",
         "package": str(pending),
         "title": package.get("title", ""),

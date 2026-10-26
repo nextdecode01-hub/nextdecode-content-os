@@ -29,9 +29,9 @@ from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT / ".env", override=True)
-VIDEO = ROOT / "output_short.mp4"
-METADATA = ROOT / "metadata.json"
-LEDGER = ROOT / "meta_uploads.json"
+VIDEO = ROOT / "outputs" / "output_short.mp4"
+METADATA = ROOT / "data" / "metadata.json"
+LEDGER = ROOT / "data" / "meta_uploads.json"
 GRAPH = "https://graph.facebook.com"
 
 

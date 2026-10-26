@@ -10,8 +10,8 @@ from visual_quality import has_publishable_visuals
 ROOT = Path(__file__).resolve().parent
 
 def main() -> int:
-    metadata = ROOT / "longform_metadata.json"
-    video = ROOT / "output_longform.mp4"
+    metadata = ROOT / "data" / "longform_metadata.json"
+    video = ROOT / "outputs" / "output_longform.mp4"
     if not metadata.exists() or not video.exists() or video.stat().st_size < 500_000:
         raise SystemExit("longform_metadata.json and a rendered output_longform.mp4 are required")
     data = json.loads(metadata.read_text(encoding="utf-8"))
@@ -42,8 +42,8 @@ def main() -> int:
         },
         "notes": "Review the exact video and complete the checklist before approval. Approval expires at the end of today (Asia/Kolkata)."
     }
-    (ROOT / "longform_review_pending.json").write_text(json.dumps(package, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps({"status": package["status"], "title": package["title"], "package": str(ROOT / "longform_review_pending.json")}))
+    (ROOT / "data" / "longform_review_pending.json").write_text(json.dumps(package, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps({"status": package["status"], "title": package["title"], "package": str(ROOT / "data" / "longform_review_pending.json")}))
 
 if __name__ == "__main__":
     main()

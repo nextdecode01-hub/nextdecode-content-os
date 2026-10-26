@@ -81,7 +81,7 @@ def _chapter_visuals(chapters: object) -> list[dict]:
 
 
 def recent_topics() -> str:
-    path = ROOT / "used_topics.txt"
+    path = ROOT / "data" / "used_topics.txt"
     if not path.exists():
         return "None yet"
     return ", ".join([x.strip() for x in path.read_text(encoding="utf-8").splitlines() if x.strip()][-20:]) or "None yet"
@@ -338,7 +338,7 @@ def _validate_script(parsed: dict, voice_text: str, selected: dict, research: li
 
 
 def generate_script(topic: str = "") -> dict:
-    research = discover_topics(ROOT / "used_topics.txt", limit=8)
+    research = discover_topics(ROOT / "data" / "used_topics.txt", limit=8)
     if not multi_model_ai.is_configured():
         raise RuntimeError("Configure OmniRoute, Gemini, Groq, or Ollama before generating long-form content.")
     selected, selection = _select_topic(research, topic.strip())
@@ -547,7 +547,7 @@ def _find_pexels_clip(query: str, destination: Path, used_video_ids: set[int]) -
 
 
 def _pixabay_search_results(query: str) -> list[dict]:
-    cache_dir = ROOT / "videos" / "pixabay_search_cache"
+    cache_dir = ROOT / "outputs" / "videos" / "pixabay_search_cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_key = hashlib.sha256(query.encode("utf-8")).hexdigest()
     cache_file = cache_dir / f"{cache_key}.json"
@@ -699,7 +699,7 @@ def landscape_background(query: str, output: Path, duration: float, chapters: li
         providers.append(("pixabay", _find_pixabay_clip, "Pixabay Content License"))
 
     if providers:
-        asset_dir = ROOT / "videos" / "longform_sources" / datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
+        asset_dir = ROOT / "outputs" / "videos" / "longform_sources" / datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
         asset_dir.mkdir(parents=True, exist_ok=True)
         clips = []
         used_video_ids = {provider: set() for provider, _, _ in providers}
@@ -752,7 +752,7 @@ def landscape_background(query: str, output: Path, duration: float, chapters: li
     else:
         stock_fallbacks = ["Neither PEXELS_API_KEY nor PIXABAY_API_KEY is configured."]
 
-    scene_dir = ROOT / "videos" / "longform_motion_graphics" / datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
+    scene_dir = ROOT / "outputs" / "videos" / "longform_motion_graphics" / datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
     scene_dir.mkdir(parents=True, exist_ok=True)
     scenes = _render_motion_graphics(chapters, output, duration, scene_dir)
     return {
@@ -994,12 +994,16 @@ def main():
     parser.add_argument("--topic", default="")
     args = parser.parse_args()
     data = generate_script(args.topic)
-    (ROOT / "longform_metadata.json").write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-    (ROOT / "longform_script.txt").write_text(data["voice_text"] + "\n", encoding="utf-8")
-    audio = ROOT / "longform_voice.mp3"
-    background = ROOT / "longform_background.mp4"
-    ass = ROOT / "longform_subtitles.ass"
-    output = ROOT / "output_longform.mp4"
+    data_dir = ROOT / "data"
+    output_dir = ROOT / "outputs"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (data_dir / "longform_metadata.json").write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    (data_dir / "longform_script.txt").write_text(data["voice_text"] + "\n", encoding="utf-8")
+    audio = output_dir / "longform_voice.mp3"
+    background = output_dir / "longform_background.mp4"
+    ass = output_dir / "longform_subtitles.ass"
+    output = output_dir / "output_longform.mp4"
     voiceover(data["voice_text"], audio)
     probe = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(audio)], capture_output=True, text=True, check=True)
     duration = float(probe.stdout.strip())
@@ -1013,10 +1017,10 @@ def main():
         data["description"] = (
             data["description"] + "\n\nStock video credits:\n" + "\n".join(stock_credits)
         )[:5000]
-    (ROOT / "longform_metadata.json").write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    (data_dir / "longform_metadata.json").write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     subtitles(audio, ass)
     render(background, audio, ass, output)
-    archived_video = archive_video(output, ROOT / "longform_metadata.json", ROOT, "longform", data["title"])
+    archived_video = archive_video(output, data_dir / "longform_metadata.json", ROOT, "longform", data["title"])
     print(f"Archived long-form video: {archived_video.resolve()}")
     print(json.dumps({"status": "success", "format": "youtube_longform", "title": data["title"], "word_count": data["word_count"], "video": str(output)}))
 

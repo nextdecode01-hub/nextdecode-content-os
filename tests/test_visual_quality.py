@@ -65,11 +65,15 @@ class VisualQualityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             visuals = {"mode": "procedural_fallback", "asset_count": 0}
-            metadata = root / "longform_metadata.json"
-            video = root / "output_longform.mp4"
+            data_dir = root / "data"
+            output_dir = root / "outputs"
+            data_dir.mkdir()
+            output_dir.mkdir()
+            metadata = data_dir / "longform_metadata.json"
+            video = output_dir / "output_longform.mp4"
             metadata.write_text(json.dumps({"visuals": visuals}), encoding="utf-8")
             video.write_bytes(b"video")
-            (root / "longform_review_pending.json").write_text(
+            (data_dir / "longform_review_pending.json").write_text(
                 json.dumps({
                     "checklist": {name: True for name in approve_longform.REQUIRED},
                     "visuals": visuals,
@@ -85,11 +89,12 @@ class VisualQualityTests(unittest.TestCase):
     def test_short_approval_blocks_procedural_visuals_even_if_checklist_is_ticked(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            package_path = root / "review_queue" / "package.json"
-            package_path.parent.mkdir()
+            package_path = root / "data" / "review_queue" / "package.json"
+            package_path.parent.mkdir(parents=True)
             visuals = {"mode": "procedural_fallback", "asset_count": 0}
-            metadata_path = root / "metadata.json"
-            video_path = root / "output_short.mp4"
+            metadata_path = root / "data" / "metadata.json"
+            video_path = root / "outputs" / "output_short.mp4"
+            video_path.parent.mkdir()
             metadata_path.write_text(json.dumps({"visuals": visuals}), encoding="utf-8")
             video_path.write_bytes(b"video")
             checks = {
@@ -106,7 +111,7 @@ class VisualQualityTests(unittest.TestCase):
                 "metadata_sha256": sha256_file(metadata_path),
                 "video_sha256": sha256_file(video_path),
             }), encoding="utf-8")
-            (root / "review_pending.json").write_text(json.dumps({"package": str(package_path)}), encoding="utf-8")
+            (root / "data" / "review_pending.json").write_text(json.dumps({"package": str(package_path)}), encoding="utf-8")
             with patch.object(approve_review, "ROOT", root), patch("sys.argv", ["approve_review.py"]):
                 with self.assertRaisesRegex(SystemExit, "draft with procedural visuals"):
                     approve_review.main()
@@ -117,11 +122,15 @@ class VisualQualityTests(unittest.TestCase):
             asset = root / "footage.mp4"
             asset.write_bytes(b"video")
             visuals = {"mode": "owner_recorded", "asset_count": 1, "asset_path": str(asset)}
-            metadata = root / "longform_metadata.json"
-            video = root / "output_longform.mp4"
+            data_dir = root / "data"
+            output_dir = root / "outputs"
+            data_dir.mkdir()
+            output_dir.mkdir()
+            metadata = data_dir / "longform_metadata.json"
+            video = output_dir / "output_longform.mp4"
             metadata.write_text(json.dumps({"visuals": visuals, "title": "Owner footage video"}), encoding="utf-8")
             video.write_bytes(b"rendered-video")
-            (root / "longform_review_pending.json").write_text(
+            (data_dir / "longform_review_pending.json").write_text(
                 json.dumps({
                     "title": "Owner footage video",
                     "visuals": visuals,
@@ -139,7 +148,7 @@ class VisualQualityTests(unittest.TestCase):
                 result = approve_longform.main()
 
             self.assertIsNone(result)
-            approved = json.loads((root / "longform_review_approved.json").read_text(encoding="utf-8"))
+            approved = json.loads((root / "data" / "longform_review_approved.json").read_text(encoding="utf-8"))
             self.assertEqual(approved["status"], "approved")
 
 

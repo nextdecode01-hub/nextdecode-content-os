@@ -64,7 +64,7 @@ for module in ("topic_selector", "research_desk", "script_studio", "voice_guide"
 
 add(
     "Strong pipeline: provider health",
-    (ROOT / "model_health.json").is_file(),
+    (ROOT / "data" / "model_health.json").is_file(),
     "Run ./venv/bin/python model_health.py --probe --prune to record which models actually work",
 )
 add(

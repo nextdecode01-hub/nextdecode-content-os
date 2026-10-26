@@ -260,7 +260,7 @@ def main():
     if args.list:
         list_providers(); return
     if args.generate:
-        out = args.out or "/home/demon/shorts_studio/media/test.png"
+        out = args.out or "/home/demon/shorts_studio/outputs/media/test.png"
         Path(out).parent.mkdir(parents=True, exist_ok=True)
         res = generate_image(args.generate, str(Path(out).parent), provider=args.provider)
         if res["path"] and res["path"] != out:
@@ -268,11 +268,11 @@ def main():
             except Exception: pass
         print(res); return
     if args.thumbnail:
-        out = args.out or "/home/demon/shorts_studio/media/thumb.jpg"
+        out = args.out or "/home/demon/shorts_studio/outputs/media/thumb.jpg"
         Path(out).parent.mkdir(parents=True, exist_ok=True)
         print(generate_thumbnail(args.thumbnail, args.thumbnail, out, provider=args.provider)); return
     if args.remove_bg:
-        out_dir = str(Path(args.out).parent) if args.out else "/home/demon/shorts_studio/media"
+        out_dir = str(Path(args.out).parent) if args.out else "/home/demon/shorts_studio/outputs/media"
         Path(out_dir).mkdir(parents=True, exist_ok=True)
         print(remove_background(args.remove_bg, out_dir)); return
     if args.public_url:

@@ -48,7 +48,7 @@ DAILY_TOKEN_LIMITS = {
     "gemini": 10_000_000,
     "ollama": float("inf"),
 }
-TOKEN_USAGE_PATH = Path(__file__).with_name("token_usage.json")
+TOKEN_USAGE_PATH = Path(__file__).resolve().parent / "data" / "token_usage.json"
 PROVIDER_ORDER = ("omniroute", "gemini", "groq", "pollinations_text", "nvidia", "cloudflare", "openrouter", "mistral", "cerebras", "ollama")
 
 # Free fallback providers (OpenAI-compatible endpoints)

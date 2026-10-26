@@ -66,7 +66,7 @@ def validate_opening_quality(hook: str, voice_text: str, source_urls: list[str])
 
 def get_recent_topics(max_count: int = 10) -> str:
     """Reads past topics from history to avoid repeating content."""
-    history_file = SCRIPT_DIR / "used_topics.txt"
+    history_file = SCRIPT_DIR / "data" / "used_topics.txt"
     if history_file.exists():
         lines = [line.strip() for line in history_file.read_text().splitlines() if line.strip()]
         return ", ".join(lines[-max_count:])
@@ -74,13 +74,14 @@ def get_recent_topics(max_count: int = 10) -> str:
 
 def record_topic(title: str):
     """Appends newly generated topic to history file."""
-    history_file = SCRIPT_DIR / "used_topics.txt"
+    history_file = SCRIPT_DIR / "data" / "used_topics.txt"
+    history_file.parent.mkdir(parents=True, exist_ok=True)
     with open(history_file, "a", encoding="utf-8") as f:
         f.write(title + "\n")
 
 def generate_script(topic: str = None) -> dict:
     """Create a research-led Nextdecode script. Fail closed instead of publishing a stale template."""
-    research = discover_topics(SCRIPT_DIR / "used_topics.txt", limit=6)
+    research = discover_topics(SCRIPT_DIR / "data" / "used_topics.txt", limit=6)
     if topic:
         selected_topic = topic.strip()
     elif research:
@@ -92,7 +93,7 @@ def generate_script(topic: str = None) -> dict:
         raise RuntimeError("Configure OmniRoute, Gemini, Groq, or Ollama before generating a video.")
 
     sources_context = json.dumps(research[:5], ensure_ascii=False, indent=2)
-    format_file = SCRIPT_DIR / "recent_formats.txt"
+    format_file = SCRIPT_DIR / "data" / "recent_formats.txt"
     recent_formats = format_file.read_text(encoding="utf-8").splitlines()[-4:] if format_file.exists() else []
     recent_formats_text = ", ".join(recent_formats) or "None yet"
     prompt = f"""
@@ -424,12 +425,14 @@ def main():
     )
     args = parser.parse_args()
 
-    work_dir = SCRIPT_DIR
+    work_dir = SCRIPT_DIR / "outputs"
+    work_dir.mkdir(parents=True, exist_ok=True)
     audio_file = work_dir / "voice.mp3"
     bg_video_file = work_dir / "background.mp4"
     ass_sub_file = work_dir / "subtitles.ass"
     output_mp4 = work_dir / "output_short.mp4"
-    metadata_file = work_dir / "metadata.json"
+    metadata_file = SCRIPT_DIR / "data" / "metadata.json"
+    metadata_file.parent.mkdir(parents=True, exist_ok=True)
 
     if args.quality == "strong":
         try:
@@ -440,9 +443,9 @@ def main():
             print(f"[!] Strong pipeline failed ({type(exc).__name__}: {exc}); falling back to the standard path.")
         else:
             record_topic(data.get("topic", data.get("title", "")))
-            archived_video = archive_video(output_mp4, metadata_file, work_dir, "shorts", data["title"])
+            archived_video = archive_video(output_mp4, metadata_file, SCRIPT_DIR, "shorts", data["title"])
             print(f"[+] Archived Short: {archived_video.resolve()}")
-            with open(work_dir / "recent_formats.txt", "a", encoding="utf-8") as formats:
+            with open(SCRIPT_DIR / "data" / "recent_formats.txt", "a", encoding="utf-8") as formats:
                 formats.write(data.get("content_pillar", "What Changed") + "\n")
             print(json.dumps({
                 "status": "success",
@@ -483,7 +486,7 @@ def main():
     record_topic(data.get("topic", data["title"]))
     archived_video = archive_video(output_mp4, metadata_file, SCRIPT_DIR, "shorts", data["title"])
     print(f"[+] Archived Short: {archived_video.resolve()}")
-    with open(work_dir / "recent_formats.txt", "a", encoding="utf-8") as formats:
+    with open(SCRIPT_DIR / "data" / "recent_formats.txt", "a", encoding="utf-8") as formats:
         formats.write(data["content_pillar"] + "\n")
     # Output metadata for n8n or caller
     print(json.dumps({

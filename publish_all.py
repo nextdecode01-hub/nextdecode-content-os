@@ -40,8 +40,8 @@ GENERIC_HOOK_PREFIXES = (
 
 
 def validate_content() -> str:
-    metadata_path = ROOT / "metadata.json"
-    video_path = ROOT / "output_short.mp4"
+    metadata_path = ROOT / "data" / "metadata.json"
+    video_path = ROOT / "outputs" / "output_short.mp4"
     if not metadata_path.is_file() or not video_path.is_file() or video_path.stat().st_size < 150_000:
         return "Fresh metadata or a rendered video is missing; regenerate before publishing"
     try:
@@ -86,14 +86,14 @@ def validate_content() -> str:
     return ""
 
 def approval_matches_current_content() -> str:
-    approval_file = ROOT / "review_approved.json"
-    metadata_file = ROOT / "metadata.json"
+    approval_file = ROOT / "data" / "review_approved.json"
+    metadata_file = ROOT / "data" / "metadata.json"
     try:
         approval = json.loads(approval_file.read_text(encoding="utf-8"))
         package_path = Path(str(approval.get("package", "")))
         package = json.loads(package_path.read_text(encoding="utf-8"))
         metadata = json.loads(metadata_file.read_text(encoding="utf-8"))
-        video_file = ROOT / "output_short.mp4"
+        video_file = ROOT / "outputs" / "output_short.mp4"
         current_hashes = {
             "metadata_sha256": sha256_file(metadata_file),
             "video_sha256": sha256_file(video_file),
@@ -154,7 +154,7 @@ def run(scheduled_approved: bool = False) -> int:
         print(json.dumps({"status": "blocked_approval", "reason": reason}, ensure_ascii=False))
         send_status("Nextdecode Shorts Studio: a review package is ready; publishing is waiting for explicit owner approval.")
         return 2
-    approval_file = ROOT / "review_approved.json"
+    approval_file = ROOT / "data" / "review_approved.json"
     if not approval_file.is_file():
         reason = "No approved review package exists; run approve_review.py after completing the checklist."
         print(json.dumps({"status": "blocked_approval", "reason": reason}, ensure_ascii=False))

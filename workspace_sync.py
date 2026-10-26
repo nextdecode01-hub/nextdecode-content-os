@@ -4,7 +4,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT / ".env", override=True)
-DB_PATH = ROOT / "workspace.db"
+DB_PATH = ROOT / "data" / "workspace.db"
 
 def env(name):
     v = os.getenv(name, "").strip()

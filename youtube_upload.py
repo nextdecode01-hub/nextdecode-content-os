@@ -100,9 +100,9 @@ def save_upload_ledger(path: Path, ledger: dict):
 
 
 if __name__ == "__main__":
-    meta_file = SCRIPT_DIR / "metadata.json"
-    video_file = SCRIPT_DIR / "output_short.mp4"
-    ledger_file = SCRIPT_DIR / "uploaded_content.json"
+    meta_file = SCRIPT_DIR / "data" / "metadata.json"
+    video_file = SCRIPT_DIR / "outputs" / "output_short.mp4"
+    ledger_file = SCRIPT_DIR / "data" / "uploaded_content.json"
     if not meta_file.exists() or not video_file.exists() or video_file.stat().st_size < 150_000:
         raise SystemExit("Metadata or a valid rendered video is missing; upload skipped.")
 

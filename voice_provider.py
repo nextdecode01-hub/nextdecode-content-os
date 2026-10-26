@@ -758,7 +758,7 @@ def main() -> int:
         print("\nUse --list, --speak, --test or --text-file.")
         return 0
 
-    out_path = Path(args.out) if args.out else ROOT / "tts_output.mp3"
+    out_path = Path(args.out) if args.out else ROOT / "outputs" / "tts_output.mp3"
 
     if args.long:
         result = synthesize_long(text, out_path, preferred=args.provider)

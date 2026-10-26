@@ -264,7 +264,7 @@ imports or keep compatibility shims.
 | File | Referenced by | Target |
 |---|---|---|
 | `metadata.json` | `create_short` writes; review/approve/publish/upload read | `data/` |
-| `metadata_strong.json` | `strong_pipeline` / `run_gen.sh` | `outputs/` or `data/` |
+| `metadata_strong.json` | `strong_pipeline` / `run_gen.sh` | `data/` |
 | `longform_metadata.json` | `create_longform` writes; review/approve/upload read | `data/` |
 | `review_pending.json` | `review_bundle` writes; `approve_review`, `notify_review` read | `data/` |
 | `review_queue/*.json` | `review_bundle` writes; `approve_review` reads | `data/review_queue/` |
@@ -286,8 +286,12 @@ imports or keep compatibility shims.
 | `workspace.db` | `workspace_sync.py` only (SQLite `content_records`) | `data/workspace.db` |
 | `youtube_token.json` | OAuth helpers write; `youtube_upload`, `publish_all` read | secret, stay root/ignored |
 | `output_short.mp4`, `output_longform.mp4` | render -> review -> publish | `outputs/` |
-| `longform_voice.mp3`, `longform_subtitles.ass`, `longform_script.txt` | `create_longform` | `outputs/` |
-| `shots/`, `media/`, `output/`, `videos/` | generated assets | `outputs/` (or `data/cache/`) |
+| `longform_voice.mp3`, `longform_subtitles.ass`, `longform_background.mp4` | `create_longform` | `outputs/` |
+| `longform_script.txt` | `create_longform` | `data/` |
+| `token_usage.json` | `multi_model_ai` | `data/` |
+| `tts_output.mp3`, `voice.mp3`, `subtitles.ass`, `background.mp4` | `voice_provider`, `strong_pipeline`, `create_short` | `outputs/` |
+| `shots/`, `media/`, `videos/`, `output/audio/` | generated assets | `outputs/` |
+| archived videos | `video_archive` | `outputs/archive/` (or `VIDEO_ARCHIVE_DIR`) |
 | `.scheduled_generation.lock` | `flock` in `run_scheduled_generation.sh` | replace with PID+timestamp lock |
 | `.publish_all.lock` | `publish_all.py` PID-only lock | migrate to shared lock helper |
 | `.env`, `.n8n-docker.env` | runtime secrets | never move into tracked data |
