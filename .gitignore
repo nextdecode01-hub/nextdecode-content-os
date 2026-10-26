@@ -5,7 +5,9 @@
 /.n8n-docker.env
 /token.json
 /youtube_token.json
+/youtube_token*.json
 /token_usage.json
+/cloudflared
 *credentials*.json
 *client_secret*.json
 credentials/
@@ -26,6 +28,7 @@ __pycache__/
 
 # Local runtime and tooling output
 *.log
+*.lock
 .publish_all.lock
 .scheduled_generation.lock
 .coverage
@@ -42,7 +45,19 @@ Thumbs.db
 # Accidental Windows-path mirror of the project
 wsl.localhost/
 
-# Generated project media
+# Generated project media (all formats, including future outputs/)
+*.mp4
+*.mov
+*.webm
+*.mp3
+*.wav
+*.m4a
+*.ass
+*.srt
+/outputs/
+/output/
+/shots/
+/videos/
 /background.mp4
 /longform_background.mp4
 /longform_voice.mp3
@@ -53,7 +68,6 @@ wsl.localhost/
 /test_audio.mp3
 /voice.mp3
 /subtitles.ass
-/videos/
 
 # Per-run generated metadata, review state, and upload ledgers
 /metadata.json
@@ -68,6 +82,7 @@ wsl.localhost/
 /uploaded_longform_content.json
 
 # New runtime state
+/data/
 /trend_cache.json
 /trend_history.json
 /social_upload_ledger.json
