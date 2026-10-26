@@ -146,7 +146,7 @@ as HTTP 200.
 
 | Module | Imports | Imported by | Trigger | Target |
 |---|---|---|---|---|
-| `multi_model_ai.py` | `model_health`, `omniroute_client` | `create_longform`, `create_short`, `model_health`, `script_studio`, `topic_selector`, `trend_research`, `visual_assets` | CLI + imports | `app/core/ai.py` |
+| `multi_model_ai.py` | `model_health`, `omniroute_client` | `app.research.selector`, `app.research.trends`, `app.script.longform`, `app.script.studio`, `create_short`, `model_health`, `visual_assets` | CLI + imports | `app/core/ai.py` |
 | `model_health.py` | `multi_model_ai`, `omniroute_client` | `multi_model_ai` | CLI probe; reads `model_health.json` | `app/core/model_health.py` |
 | `omniroute_client.py` | — | `model_health`, `multi_model_ai` | import only | `app/core/ai.py` |
 | `ollama_chat.py` | — | — | CLI only (`multi_model_ai` talks to Ollama over HTTP itself) | archived in `archive/optional-cli/` |
@@ -171,13 +171,15 @@ logic; only import paths and project-root lookups changed.
 
 | Module | Imports | Imported by | Trigger | Target |
 |---|---|---|---|---|
-| `script_studio.py` | `multi_model_ai`, `voice_guide` | `strong_pipeline` | CLI + import | `app/script/studio.py` |
-| `voice_guide.py` | — | `script_studio` | CLI + import | `app/script/voice_guide.py` |
+| `app/script/studio.py` (was `script_studio.py`) | `multi_model_ai`, `app.script.voice_guide` | `strong_pipeline` | CLI + import | moved in Phase 5 |
+| `app/script/voice_guide.py` (was `voice_guide.py`) | — | `app.script.studio` | CLI + import | moved in Phase 5 |
+| `app/script/longform.py` (extracted from `create_longform.py`) | `multi_model_ai`, `app.research.topics` | `create_longform` | import | moved in Phase 5 |
 | `voice_provider.py` | — | `strong_pipeline` | CLI + import | `app/voice/provider.py` |
-| `strong_pipeline.py` | `motion_director`, `motion_render`, `research_desk`, `script_studio`, `topic_research`, `topic_selector`, `voice_provider` | `create_short` | `run_gen.sh`; imported by `create_short` | `app/script/pipeline.py` |
+| `strong_pipeline.py` | `app.research.desk`, `app.research.selector`, `app.research.topics`, `app.script.studio`, `motion_director`, `motion_render`, `voice_provider` | `create_short` | `run_gen.sh`; imported by `create_short` | `app/script/pipeline.py` |
 
-`voice_guide.py` is editorial prompt/copy guidance, not TTS. `voice_provider.py` is TTS.
-Phase 6 should merge the package, not the logic.
+`app.script.voice_guide` is editorial prompt/copy guidance, not TTS. `voice_provider.py` is TTS.
+Phase 6 should merge the package, not the logic. `create_longform.py` keeps only visual/render
+helpers after Phase 5; script research and generation live in `app.script.longform`.
 
 ### 5.4 Visuals / render
 
@@ -241,17 +243,17 @@ Phase 6 should merge the package, not the logic.
 | Test | Local modules imported |
 |---|---|
 | `tests/test_approval_integrity.py` | `approval_integrity`, `publish_all`, `scheduled_publish` |
-| `tests/test_longform_editorial.py` | `create_longform` |
+| `tests/test_longform_editorial.py` | `app.script.longform`, `create_longform` |
 | `tests/test_longform_visuals.py` | `create_longform` |
 | `tests/test_motion.py` | `motion_director`, `motion_render` |
-| `tests/test_multi_model_ai.py` | `create_longform`, `create_short`, `multi_model_ai` |
+| `tests/test_multi_model_ai.py` | `app.script.longform`, `create_short`, `multi_model_ai` |
 | `tests/test_n8n_runner.py` | `n8n_runner` |
 | `tests/test_n8n_workflow.py` | — (reads workflow JSON) |
 | `tests/test_phase0_repo_hygiene.py` | — |
 | `tests/test_research_desk.py` | `app.research.desk` |
-| `tests/test_script_studio.py` | `script_studio`, `voice_guide` |
+| `tests/test_script_studio.py` | `app.script.studio`, `app.script.voice_guide` |
 | `tests/test_setup_check.py` | — (copies `setup_check.py`) |
-| `tests/test_strong_pipeline.py` | `model_health`, `motion_director`, `script_studio`, `stock_fetcher`, `strong_pipeline` |
+| `tests/test_strong_pipeline.py` | `app.script.studio`, `model_health`, `motion_director`, `stock_fetcher`, `strong_pipeline` |
 | `tests/test_topic_research.py` | `app.research.topics` |
 | `tests/test_visual_quality.py` | `approval_integrity`, `approve_longform`, `approve_review`, `visual_quality` |
 

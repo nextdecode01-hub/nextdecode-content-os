@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import patch
 
 import multi_model_ai
-import create_longform
+from app.script import longform as longform_script
 import create_short
 
 
@@ -205,16 +205,16 @@ class GenerateJsonTests(unittest.TestCase):
         }]
         source_text, selection, script, secondary_text = self._longform_generation_responses(source_url)
         with (
-            patch.object(create_longform, "discover_topics", return_value=research),
-            patch.object(create_longform.multi_model_ai, "is_configured", return_value=True),
-            patch.object(create_longform, "_fetch_primary_source_text", return_value=source_text),
-            patch.object(create_longform, "_collect_research_documents", return_value=[
+            patch.object(longform_script, "discover_topics", return_value=research),
+            patch.object(longform_script.multi_model_ai, "is_configured", return_value=True),
+            patch.object(longform_script, "_fetch_primary_source_text", return_value=source_text),
+            patch.object(longform_script, "_collect_research_documents", return_value=[
                 {"kind": "primary", "title": "Long-form research topic", "publisher": "Hacker News", "url": source_url, "source_text": source_text},
                 {"kind": "independent_secondary", "title": "Independent coverage", "publisher": "Example", "url": "https://independent.example.com/coverage", "source_text": secondary_text},
             ]),
-            patch.object(create_longform.multi_model_ai, "generate_json", side_effect=[selection, script]) as generate_json,
+            patch.object(longform_script.multi_model_ai, "generate_json", side_effect=[selection, script]) as generate_json,
         ):
-            result = create_longform.generate_script("Long-form research topic")
+            result = longform_script.generate_script("Long-form research topic")
 
         self.assertEqual(result["title"], script["title"])
         self.assertEqual(result["editorial_selection"]["editorial_score"], 80)
@@ -232,35 +232,35 @@ class GenerateJsonTests(unittest.TestCase):
         source_text, selection, script, secondary_text = self._longform_generation_responses(source_url)
         with (
             patch.dict(os.environ, {"AI_GENERATION_PROVIDER": "ollama"}),
-            patch.object(create_longform, "discover_topics", return_value=research),
-            patch.object(create_longform.multi_model_ai, "is_configured", return_value=True),
-            patch.object(create_longform, "_fetch_primary_source_text", return_value=source_text),
-            patch.object(create_longform, "_collect_research_documents", return_value=[
+            patch.object(longform_script, "discover_topics", return_value=research),
+            patch.object(longform_script.multi_model_ai, "is_configured", return_value=True),
+            patch.object(longform_script, "_fetch_primary_source_text", return_value=source_text),
+            patch.object(longform_script, "_collect_research_documents", return_value=[
                 {"kind": "primary", "title": "Long-form research topic", "publisher": "Hacker News", "url": source_url, "source_text": source_text},
                 {"kind": "independent_secondary", "title": "Independent coverage", "publisher": "Example", "url": "https://independent.example.com/coverage", "source_text": secondary_text},
             ]),
-            patch.object(create_longform.multi_model_ai, "generate_json", side_effect=[selection, script]) as generate_json,
+            patch.object(longform_script.multi_model_ai, "generate_json", side_effect=[selection, script]) as generate_json,
         ):
-            create_longform.generate_script("Long-form research topic")
+            longform_script.generate_script("Long-form research topic")
 
         self.assertEqual(generate_json.call_args_list[-1].kwargs["timeout"], 600)
 
     def test_longform_profiles_cover_two_to_ten_minutes(self):
         self.assertEqual(
-            {name for name, profile in create_longform.PROFILES.items() if 2 <= profile["minutes"] <= 10},
+            {name for name, profile in longform_script.PROFILES.items() if 2 <= profile["minutes"] <= 10},
             {"long_2m", "long_4m", "long_6m", "long_8m", "long_10m"},
         )
-        self.assertEqual(create_longform.PROFILES["long_8m"]["minutes"], 8)
+        self.assertEqual(longform_script.PROFILES["long_8m"]["minutes"], 8)
 
     def test_longform_chapters_require_distinct_searchable_visuals(self):
         chapters = [
             {"title": f"Chapter {number}", "start_seconds": number * 60, "broll_query": f"technology scene {number}"}
             for number in range(4)
         ]
-        self.assertEqual(len(create_longform._chapter_visuals(chapters)), 4)
+        self.assertEqual(len(longform_script._chapter_visuals(chapters)), 4)
         chapters[2]["start_seconds"] = chapters[1]["start_seconds"]
         with self.assertRaisesRegex(RuntimeError, "strictly increasing"):
-            create_longform._chapter_visuals(chapters)
+            longform_script._chapter_visuals(chapters)
 
 
 if __name__ == "__main__":

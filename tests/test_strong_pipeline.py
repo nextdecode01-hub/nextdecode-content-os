@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import model_health
 import motion_director
-import script_studio
+from app.script import studio as script_studio
 import stock_fetcher
 import strong_pipeline
 

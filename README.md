@@ -10,8 +10,9 @@ Research-led vertical videos for Nextdecode. The full pipeline researches curren
 - strong_pipeline.py — the strong editorial chain that `create_short.py --quality strong` runs.
 - app/research/selector.py — scores candidate topics on seven editorial dimensions and picks the best one.
 - app/research/desk.py — fetches and actually reads the sources, extracts verbatim claims, flags unsupported numbers and contradictions.
-- script_studio.py — generates hook candidates, scores them, writes a beat sheet, and runs a critic loop that rewrites until the script passes.
-- voice_guide.py — hook archetypes, channel voice, and the AI-slop ban list.
+- app/script/studio.py — generates hook candidates, scores them, writes a beat sheet, and runs a critic loop that rewrites until the script passes.
+- app/script/voice_guide.py — hook archetypes, channel voice, and the AI-slop ban list.
+- app/script/longform.py — research-backed long-form topic selection, source validation, and script generation.
 - motion_director.py — plans the edited shot list (cuts, zoom, SFX, safe zones).
 - motion_render.py — renders the multi-shot video with Ken Burns motion, kinetic captions, music bed and SFX.
 - stock_fetcher.py — key-free real-photo sourcing from Wikimedia Commons with licence attribution.
@@ -134,7 +135,7 @@ Long-form topic selection compares up to eight recent candidates using an AI edi
 
 ## Local video archive
 
-After quality checks, both generators archive the finished MP4 and its JSON metadata. On this Windows/WSL setup the default archive is `D:\ShortsStudioVideos`, organized as `shorts\YYYY\MM` and `longform\YYYY\MM`. Rendering and publishing continue to use the existing project files, so this does not change the publishing workflow. If `D:` is unavailable, the archive defaults to the project `videos` folder. Set `VIDEO_ARCHIVE_DIR` in `.env` to choose another local path. The archive is local storage, not an online backup; monitor its remaining disk space.
+After quality checks, both generators archive the finished MP4 and its JSON metadata. On this Windows/WSL setup the default archive is `D:\ShortsStudioVideos`, organized as `shorts\YYYY\MM` and `longform\YYYY\MM`. Rendering and publishing continue to use the existing project files, so this does not change the publishing workflow. If `D:` is unavailable, the archive defaults to the project `outputs/archive` folder. Set `VIDEO_ARCHIVE_DIR` in `.env` to choose another local path. The archive is local storage, not an online backup; monitor its remaining disk space.
 
 Open output_short.mp4 from Windows File Explorer at:
 

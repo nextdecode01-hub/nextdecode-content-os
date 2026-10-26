@@ -2,6 +2,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from app.script import longform as longform_script
 import create_longform
 
 
@@ -51,10 +52,10 @@ class LongformEditorialTests(unittest.TestCase):
         ]
 
     def test_topic_selection_uses_editorial_scorecard_and_records_it_as_estimate(self):
-        with patch.object(create_longform, "recent_topics", return_value="None"), patch(
-            "create_longform.multi_model_ai.generate_json", return_value=selection_result("T2", 4)
+        with patch.object(longform_script, "recent_topics", return_value="None"), patch(
+            "app.script.longform.multi_model_ai.generate_json", return_value=selection_result("T2", 4)
         ) as generate:
-            selected, scorecard = create_longform._select_topic(self.research)
+            selected, scorecard = longform_script._select_topic(self.research)
 
         self.assertEqual(selected["url"], "https://example.com/robots")
         self.assertEqual(scorecard["editorial_score"], 80)
@@ -64,25 +65,25 @@ class LongformEditorialTests(unittest.TestCase):
         self.assertIn("AI research on computing", prompt)
 
     def test_topic_selection_rejects_weak_candidates(self):
-        with patch.object(create_longform, "recent_topics", return_value="None"), patch(
-            "create_longform.multi_model_ai.generate_json", return_value=selection_result(score=2)
+        with patch.object(longform_script, "recent_topics", return_value="None"), patch(
+            "app.script.longform.multi_model_ai.generate_json", return_value=selection_result(score=2)
         ), self.assertRaisesRegex(RuntimeError, "did not meet|met the editorial bar"):
-            create_longform._select_topic(self.research)
+            longform_script._select_topic(self.research)
 
     def test_requested_topic_must_be_supported_by_selected_candidate(self):
-        with patch.object(create_longform, "recent_topics", return_value="None"), patch(
-            "create_longform.multi_model_ai.generate_json", return_value=selection_result("T2", 4)
+        with patch.object(longform_script, "recent_topics", return_value="None"), patch(
+            "app.script.longform.multi_model_ai.generate_json", return_value=selection_result("T2", 4)
         ), self.assertRaisesRegex(RuntimeError, "does not substantiate"):
-            create_longform._select_topic(self.research, "quantum biology")
+            longform_script._select_topic(self.research, "quantum biology")
 
     def test_primary_source_fetch_prefers_arxiv_full_text_and_excludes_script_content(self):
         source_text = "Detailed paper section and methodology. " * 50
         html = f"<html><script>ignore this text</script><main><h1>Paper</h1><p>{source_text}</p></main></html>"
         with patch(
-            "create_longform.requests.get",
+            "app.script.longform.requests.get",
             return_value=Response(html, url="https://ar5iv.labs.arxiv.org/html/1234.5678"),
         ) as get:
-            extracted = create_longform._fetch_primary_source_text("https://arxiv.org/abs/1234.5678")
+            extracted = longform_script._fetch_primary_source_text("https://arxiv.org/abs/1234.5678")
 
         self.assertIn("Detailed paper section", extracted)
         self.assertNotIn("ignore this text", extracted)
@@ -90,9 +91,9 @@ class LongformEditorialTests(unittest.TestCase):
 
     def test_primary_source_fetch_fails_closed_when_page_has_no_readable_content(self):
         with patch(
-            "create_longform.requests.get", return_value=Response("<html><script>empty</script></html>")
+            "app.script.longform.requests.get", return_value=Response("<html><script>empty</script></html>")
         ), self.assertRaisesRegex(RuntimeError, "refusing an abstract-only script"):
-            create_longform._fetch_primary_source_text("https://example.com/paper")
+            longform_script._fetch_primary_source_text("https://example.com/paper")
 
     def test_research_packet_requires_a_relevant_independently_hosted_secondary_source(self):
         selected = {
@@ -106,11 +107,11 @@ class LongformEditorialTests(unittest.TestCase):
             "publisher": "Independent Tech News",
             "url": "https://news.google.com/rss/articles/example",
         }
-        with patch("create_longform.search_related_news", return_value=[secondary]), patch(
-            "create_longform._fetch_source_document",
+        with patch("app.script.longform.search_related_news", return_value=[secondary]), patch(
+            "app.script.longform._fetch_source_document",
             return_value=("Independent report text " * 100, "https://independent.example.com/story"),
         ):
-            documents = create_longform._collect_research_documents(selected, "Primary source text")
+            documents = longform_script._collect_research_documents(selected, "Primary source text")
 
         self.assertEqual([doc["kind"] for doc in documents], ["primary", "independent_secondary"])
         self.assertNotEqual(
@@ -147,12 +148,12 @@ class LongformEditorialTests(unittest.TestCase):
             ],
         }
         with self.assertRaisesRegex(RuntimeError, "first spoken line"):
-            create_longform._validate_script(parsed, "The script starts differently.", selected, [selected])
+            longform_script._validate_script(parsed, "The script starts differently.", selected, [selected])
 
         parsed["hook"] = "A surprising result changed the numbers."
         parsed["evidence_notes"][0]["supporting_quote"] = "An invented result."
         with self.assertRaisesRegex(RuntimeError, "unsupported"):
-            create_longform._validate_script(
+            longform_script._validate_script(
                 parsed,
                 parsed["hook"] + " Then the script continues.",
                 selected,
@@ -214,28 +215,28 @@ class LongformEditorialTests(unittest.TestCase):
             "description": "A source-led explanation.",
             "thumbnail_text": "AI Consensus",
         }
-        with patch.object(create_longform, "PROFILE", create_longform.PROFILES["long_2m"]), patch.object(
-            create_longform, "PROFILE_NAME", "long_2m"
-        ), patch.object(create_longform, "ROOT", Path(".")), patch(
-            "create_longform.discover_topics", return_value=[*self.research, {
+        with patch.object(longform_script, "PROFILE", longform_script.PROFILES["long_2m"]), patch.object(
+            longform_script, "PROFILE_NAME", "long_2m"
+        ), patch.object(longform_script, "ROOT", Path(".")), patch(
+            "app.script.longform.discover_topics", return_value=[*self.research, {
                 "title": "Unrelated language model paper",
                 "summary": "A separate paper about video models.",
                 "source": "arXiv",
                 "url": "https://arxiv.org/abs/9999.9999",
                 "rank": 99,
             }]
-        ), patch("create_longform.multi_model_ai.is_configured", return_value=True), patch(
-            "create_longform._select_topic", return_value=(selected, selection)
-        ), patch("create_longform._fetch_primary_source_text", return_value=selected["source_text"]), patch(
-            "create_longform._collect_research_documents",
+        ), patch("app.script.longform.multi_model_ai.is_configured", return_value=True), patch(
+            "app.script.longform._select_topic", return_value=(selected, selection)
+        ), patch("app.script.longform._fetch_primary_source_text", return_value=selected["source_text"]), patch(
+            "app.script.longform._collect_research_documents",
             return_value=[
                 {"kind": "primary", "title": selected["title"], "publisher": "arXiv", "url": selected["url"], "source_text": selected["source_text"]},
                 {"kind": "independent_secondary", "title": "Independent coverage", "publisher": "Example", "url": "https://independent.example.com/coverage", "source_text": "The system reduced mean latency for write-heavy requests."},
             ],
         ), patch(
-            "create_longform.multi_model_ai.generate_json", return_value=generated
+            "app.script.longform.multi_model_ai.generate_json", return_value=generated
         ) as generate:
-            result = create_longform.generate_script()
+            result = longform_script.generate_script()
 
         self.assertEqual(
             result["source_urls"],

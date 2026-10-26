@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import multi_model_ai
-import voice_guide
+from . import voice_guide
 
 
 SCRIPT_PROFILES = {

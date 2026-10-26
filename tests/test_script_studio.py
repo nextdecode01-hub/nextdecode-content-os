@@ -3,8 +3,8 @@ import json
 import unittest
 from unittest.mock import patch, MagicMock
 
-import script_studio
-import voice_guide
+from app.script import studio as script_studio
+from app.script import voice_guide
 
 CLEAN_VOICE_TEXT = (
     "AI has one key benefit for developers today. Teams can move a slow manual step into a "
@@ -57,8 +57,8 @@ class TestScriptStudio(unittest.TestCase):
         # Ends at duration
         self.assertAlmostEqual(beats[-1]['t_end'], duration, places=1)
 
-    @patch('script_studio.multi_model_ai.generate_json')
-    @patch('script_studio.multi_model_ai.generate')
+    @patch('app.script.studio.multi_model_ai.generate_json')
+    @patch('app.script.studio.multi_model_ai.generate')
     def test_plan_shots_produces_enough_shots_and_sums_correctly(self, mock_generate, mock_generate_json):
         mock_generate_json.return_value = {"best": []}
         mock_generate.return_value = "AI reduces processing time by 40 percent in tests"
@@ -116,8 +116,8 @@ class TestScriptStudio(unittest.TestCase):
         self.assertIn("off_topic_script", {issue["kind"] for issue in result["issues"]})
         self.assertFalse(result["pass"])
 
-    @patch('script_studio.multi_model_ai.generate_json')
-    @patch('script_studio.multi_model_ai.generate')
+    @patch('app.script.studio.multi_model_ai.generate_json')
+    @patch('app.script.studio.multi_model_ai.generate')
     def test_critic_loop_stops_after_max_rewrites(self, mock_generate, mock_generate_json):
         mock_generate.return_value = "AI has one key benefit for developers today."
         # First call returns bad script, subsequent calls return better
@@ -169,8 +169,8 @@ class TestScriptStudio(unittest.TestCase):
         self.assertIsInstance(script['rewrites'], int)
         self.assertLessEqual(script['rewrites'], 3)
 
-    @patch('script_studio.multi_model_ai.generate_json')
-    @patch('script_studio.multi_model_ai.generate')
+    @patch('app.script.studio.multi_model_ai.generate_json')
+    @patch('app.script.studio.multi_model_ai.generate')
     def test_report_renders_without_crashing(self, mock_generate, mock_generate_json):
         mock_generate.return_value = "AI changes how we process data today."
         mock_generate_json.return_value = {

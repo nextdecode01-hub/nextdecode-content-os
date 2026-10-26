@@ -21,7 +21,7 @@ from typing import Any
 
 import motion_director
 import motion_render
-import script_studio
+from app.script import studio as script_studio
 import voice_provider
 from app.research import desk as research_desk
 from app.research import selector as topic_selector

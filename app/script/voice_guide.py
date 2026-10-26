@@ -2,7 +2,7 @@
 """Editorial voice guide for the Nextdecode script studio.
 
 This module is pure data plus rules: it never calls a language model and never
-touches the network.  ``script_studio.py`` imports it to build every prompt and
+touches the network.  ``app/script/studio.py`` imports it to build every prompt and
 to police the finished script.
 
 What lives here
