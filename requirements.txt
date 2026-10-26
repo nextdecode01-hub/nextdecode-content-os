@@ -1,0 +1,22 @@
+python-dotenv
+groq
+openai
+anthropic
+google-generativeai
+requests
+edge-tts
+gTTS
+
+# Transcription (local whisper)
+faster-whisper
+
+# YouTube Data API
+google-api-python-client
+google-auth
+google-auth-oauthlib
+
+# Tests
+pytest
+
+# New modules (visual_assets, voice_provider, trend_research, publish_social,
+# workspace_sync, analytics_collect) use ONLY requests + stdlib � no extra deps.

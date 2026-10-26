@@ -1,0 +1,78 @@
+# Local credentials and secret material
+.env
+.env.*
+!.env.example
+/.n8n-docker.env
+/token.json
+/youtube_token.json
+/token_usage.json
+*credentials*.json
+*client_secret*.json
+credentials/
+secrets/
+*.pem
+*.key
+*.p12
+*.pfx
+*.sqlite
+*.sqlite3
+*.db
+
+# Python environments and generated interpreter files
+/.venv/
+/venv/
+__pycache__/
+*.py[cod]
+
+# Local runtime and tooling output
+*.log
+.publish_all.lock
+.scheduled_generation.lock
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Temporary editor and backup files
+*.bak
+.DS_Store
+Thumbs.db
+
+# Accidental Windows-path mirror of the project
+wsl.localhost/
+
+# Generated project media
+/background.mp4
+/longform_background.mp4
+/longform_voice.mp3
+/longform_subtitles.ass
+/longform_script.txt
+/output_*.mp4
+/test.mp4
+/test_audio.mp3
+/voice.mp3
+/subtitles.ass
+/videos/
+
+# Per-run generated metadata, review state, and upload ledgers
+/metadata.json
+/metadata.pre-crosspost-check.json
+/longform_metadata.json
+/review_pending.json
+/review_approved.json
+/longform_review_pending.json
+/longform_review_approved.json
+/review_queue/
+/uploaded_content.json
+/uploaded_longform_content.json
+
+# New runtime state
+/trend_cache.json
+/trend_history.json
+/social_upload_ledger.json
+/analytics_history.json
+/analytics_latest.json
+/workspace.db
+/media/
+.andromity/

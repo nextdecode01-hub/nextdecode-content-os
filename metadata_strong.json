@@ -1,0 +1,809 @@
+{
+  "quality": "strong",
+  "topic": "Using Perplexity Pages to create a shareable research report",
+  "title": "Kimi K3.1 Pro: 1M Token Context",
+  "hook": "How many tokens can K3.1 Pro process at once?",
+  "voice_text": "How many tokens can K3.1 Pro process at once? One million. Moonshot AI released this open-weight model with a massive context window. It also runs 2 to 3 times faster in its Highspeed variant. On Terminal-Bench 4.0, it scored 65.7%. That puts it ahead of GPT-6 Astra. However, the full model weights are not available until November 4. You can access it now on the Kimi API. Check the release date if you plan to self-host.",
+  "content_pillar": "What Changed",
+  "hook_archetype": "curiosity_gap",
+  "word_count": 83,
+  "duration_seconds": 36.72,
+  "broll_query": "Moonshot AI Kimi K3.1 Pro interface, code scrolling, terminal logs, network diagram, server rack",
+  "tags": [
+    "Moonshot AI",
+    "Kimi K3.1 Pro",
+    "LLM",
+    "AI Research",
+    "Open Source AI",
+    "Context Window"
+  ],
+  "youtube_tags": [
+    "Moonshot AI",
+    "Kimi K3.1 Pro",
+    "LLM",
+    "AI Research",
+    "Open Source AI",
+    "Context Window"
+  ],
+  "instagram_hashtags": [
+    "#MoonshotAI",
+    "#KimiK3",
+    "#AIResearch",
+    "#LLM",
+    "#TechNews",
+    "#AITools"
+  ],
+  "platform_copy": {
+    "youtube_description": "Moonshot AI has introduced Kimi K3.1 Pro, featuring a 1-million-token context window. It scores 65.7% on Terminal-Bench 4.0. The full open weights drop on November 4. \n\nSource: https://www.kimi.ai/blog/kimi-k3-1-pro",
+    "instagram_caption": "Kimi K3.1 Pro just launched with a 1-million-token context window. It scores 65.7% on Terminal-Bench 4.0. The open weights arrive on November 4.",
+    "facebook_title": "Kimi K3.1 Pro: 1M Token Context",
+    "facebook_description": "Moonshot AI released Kimi K3.1 Pro with a 1-million-token context window. It outperforms GPT-6 Astra on Terminal-Bench 4.0. Full weights release on November 4."
+  },
+  "source_urls": [
+    "https://www.kimi.ai/blog/kimi-k3-1-pro"
+  ],
+  "beat_sheet": [
+    {
+      "label": "hook",
+      "text": "How many tokens can K3.1 Pro process at once?",
+      "t_start": 0.0,
+      "t_end": 4.22,
+      "shot_hint": "research laboratory equipment illustrating the point of this line"
+    },
+    {
+      "label": "context",
+      "text": "One million.",
+      "t_start": 4.22,
+      "t_end": 5.06,
+      "shot_hint": "research laboratory equipment illustrating the point of this line"
+    },
+    {
+      "label": "mechanism",
+      "text": "Moonshot AI released this open-weight model with a massive context window.",
+      "t_start": 5.06,
+      "t_end": 10.12,
+      "shot_hint": "research laboratory equipment illustrating the point of this line"
+    },
+    {
+      "label": "mechanism",
+      "text": "It also runs 2 to 3 times faster in its Highspeed variant.",
+      "t_start": 10.12,
+      "t_end": 15.18,
+      "shot_hint": "research laboratory equipment illustrating the point of this line"
+    },
+    {
+      "label": "mechanism",
+      "text": "On Terminal-Bench 4.0, it scored 65.7%.",
+      "t_start": 15.18,
+      "t_end": 18.98,
+      "shot_hint": "research laboratory equipment illustrating the point of this line"
+    },
+    {
+      "label": "evidence",
+      "text": "That puts it ahead of GPT-6 Astra.",
+      "t_start": 18.98,
+      "t_end": 22.35,
+      "shot_hint": "research laboratory equipment illustrating the point of this line"
+    },
+    {
+      "label": "evidence",
+      "text": "However, the full model weights are not available until November 4.",
+      "t_start": 22.35,
+      "t_end": 26.99,
+      "shot_hint": "research laboratory equipment illustrating the point of this line"
+    },
+    {
+      "label": "implication",
+      "text": "You can access it now on the Kimi API.",
+      "t_start": 26.99,
+      "t_end": 30.78,
+      "shot_hint": "research laboratory equipment illustrating the point of this line"
+    },
+    {
+      "label": "payoff",
+      "text": "Check the release date if you plan to self-host.",
+      "t_start": 30.78,
+      "t_end": 35.0,
+      "shot_hint": "research laboratory equipment illustrating the point of this line"
+    }
+  ],
+  "shots": [
+    {
+      "index": 0,
+      "start": 0.0,
+      "end": 2.825,
+      "duration": 2.825,
+      "visual": "research laboratory equipment illustrating the point of this line",
+      "asset_query": "perplexity pages",
+      "asset_query_variants": [
+        "perplexity pages",
+        "shareable research",
+        "research report",
+        "shareable research report",
+        "research laboratory equipment"
+      ],
+      "source": "wikimedia",
+      "caption": "research laboratory equipment illustratin\u2026",
+      "zoom_from": 1.0,
+      "zoom_to": 1.14,
+      "pan": {
+        "x": 6.0,
+        "y": 0.0
+      },
+      "transition": "fade",
+      "sfx": "impact",
+      "music_gain_db": -15.0
+    },
+    {
+      "index": 1,
+      "start": 2.825,
+      "end": 5.649,
+      "duration": 2.825,
+      "visual": "research laboratory equipment illustrating the point of this line - alternate angle",
+      "asset_query": "shareable research",
+      "asset_query_variants": [
+        "perplexity pages",
+        "shareable research",
+        "research report",
+        "shareable research report",
+        "research laboratory equipment"
+      ],
+      "source": "ai_image",
+      "caption": "research laboratory equipment illustratin\u2026",
+      "zoom_from": 1.02,
+      "zoom_to": 1.18,
+      "pan": {
+        "x": -6.0,
+        "y": 3.0
+      },
+      "transition": "cut",
+      "sfx": "whoosh",
+      "music_gain_db": -15.5
+    },
+    {
+      "index": 2,
+      "start": 5.649,
+      "end": 8.474,
+      "duration": 2.825,
+      "visual": "research laboratory equipment illustrating the point of this line / research laboratory equipment illustrating the point of this line",
+      "asset_query": "research report",
+      "asset_query_variants": [
+        "perplexity pages",
+        "shareable research",
+        "research report",
+        "shareable research report",
+        "research laboratory equipment"
+      ],
+      "source": "procedural",
+      "caption": "research laboratory equipment illustratin\u2026",
+      "zoom_from": 1.0,
+      "zoom_to": 1.16,
+      "pan": {
+        "x": 8.0,
+        "y": -2.0
+      },
+      "transition": "cut",
+      "sfx": "whoosh",
+      "music_gain_db": -16.0
+    },
+    {
+      "index": 3,
+      "start": 8.474,
+      "end": 11.298,
+      "duration": 2.825,
+      "visual": "research laboratory equipment illustrating the point of this line - alternate angle / research laboratory equipment illustrating the point of this line - alternate angle",
+      "asset_query": "shareable research report",
+      "asset_query_variants": [
+        "perplexity pages",
+        "shareable research",
+        "research report",
+        "shareable research report",
+        "research laboratory equipment",
+        "machine learning laboratory"
+      ],
+      "source": "wikimedia",
+      "caption": "research laboratory equipment illustratin\u2026",
+      "zoom_from": 1.04,
+      "zoom_to": 1.12,
+      "pan": {
+        "x": -4.0,
+        "y": 4.0
+      },
+      "transition": "cut",
+      "sfx": "whoosh",
+      "music_gain_db": -16.5
+    },
+    {
+      "index": 4,
+      "start": 11.298,
+      "end": 14.123,
+      "duration": 2.825,
+      "visual": "research laboratory equipment illustrating the point of this line / research laboratory equipment illustrating the point of this line - alternate angle",
+      "asset_query": "research laboratory equipment",
+      "asset_query_variants": [
+        "perplexity pages",
+        "shareable research",
+        "research report",
+        "shareable research report",
+        "research laboratory equipment"
+      ],
+      "source": "ai_image",
+      "caption": "research laboratory equipment illustratin\u2026",
+      "zoom_from": 1.0,
+      "zoom_to": 1.14,
+      "pan": {
+        "x": 6.0,
+        "y": 0.0
+      },
+      "transition": "cut",
+      "sfx": "whoosh",
+      "music_gain_db": -15.0
+    },
+    {
+      "index": 5,
+      "start": 14.123,
+      "end": 16.948,
+      "duration": 2.825,
+      "visual": "research laboratory equipment illustrating the point of this line - alternate angle / research laboratory equipment illustrating the point of this line",
+      "asset_query": "perplexity pages",
+      "asset_query_variants": [
+        "perplexity pages",
+        "shareable research",
+        "research report",
+        "shareable research report",
+        "research laboratory equipment"
+      ],
+      "source": "procedural",
+      "caption": "research laboratory equipment illustratin\u2026",
+      "zoom_from": 1.02,
+      "zoom_to": 1.18,
+      "pan": {
+        "x": -6.0,
+        "y": 3.0
+      },
+      "transition": "cut",
+      "sfx": "whoosh",
+      "music_gain_db": -15.5
+    },
+    {
+      "index": 6,
+      "start": 16.948,
+      "end": 19.772,
+      "duration": 2.825,
+      "visual": "research laboratory equipment illustrating the point of this line - alternate angle",
+      "asset_query": "shareable research",
+      "asset_query_variants": [
+        "perplexity pages",
+        "shareable research",
+        "research report",
+        "shareable research report",
+        "research laboratory equipment"
+      ],
+      "source": "wikimedia",
+      "caption": "research laboratory equipment illustratin\u2026",
+      "zoom_from": 1.0,
+      "zoom_to": 1.16,
+      "pan": {
+        "x": 8.0,
+        "y": -2.0
+      },
+      "transition": "cut",
+      "sfx": "whoosh",
+      "music_gain_db": -16.0
+    },
+    {
+      "index": 7,
+      "start": 19.772,
+      "end": 22.597,
+      "duration": 2.825,
+      "visual": "research laboratory equipment illustrating the point of this line / research laboratory equipment illustrating the point of this line - alternate angle",
+      "asset_query": "research report",
+      "asset_query_variants": [
+        "perplexity pages",
+        "shareable research",
+        "research report",
+        "shareable research report",
+        "research laboratory equipment"
+      ],
+      "source": "ai_image",
+      "caption": "research laboratory equipment illustratin\u2026",
+      "zoom_from": 1.04,
+      "zoom_to": 1.12,
+      "pan": {
+        "x": -4.0,
+        "y": 4.0
+      },
+      "transition": "cut",
+      "sfx": "whoosh",
+      "music_gain_db": -16.5
+    },
+    {
+      "index": 8,
+      "start": 22.597,
+      "end": 25.422,
+      "duration": 2.825,
+      "visual": "research laboratory equipment illustrating the point of this line",
+      "asset_query": "research report",
+      "asset_query_variants": [
+        "perplexity pages",
+        "shareable research",
+        "research report",
+        "shareable research report",
+        "research laboratory equipment",
+        "machine learning laboratory"
+      ],
+      "source": "procedural",
+      "caption": "research laboratory equipment illustratin\u2026",
+      "zoom_from": 1.0,
+      "zoom_to": 1.14,
+      "pan": {
+        "x": 6.0,
+        "y": 0.0
+      },
+      "transition": "cut",
+      "sfx": "whoosh",
+      "music_gain_db": -15.0
+    },
+    {
+      "index": 9,
+      "start": 25.422,
+      "end": 28.246,
+      "duration": 2.825,
+      "visual": "research laboratory equipment illustrating the point of this line - alternate angle",
+      "asset_query": "shareable research report",
+      "asset_query_variants": [
+        "perplexity pages",
+        "shareable research",
+        "research report",
+        "shareable research report",
+        "research laboratory equipment",
+        "machine learning laboratory"
+      ],
+      "source": "wikimedia",
+      "caption": "research laboratory equipment illustratin\u2026",
+      "zoom_from": 1.02,
+      "zoom_to": 1.18,
+      "pan": {
+        "x": -6.0,
+        "y": 3.0
+      },
+      "transition": "cut",
+      "sfx": "whoosh",
+      "music_gain_db": -15.5
+    },
+    {
+      "index": 10,
+      "start": 28.246,
+      "end": 31.071,
+      "duration": 2.825,
+      "visual": "research laboratory equipment illustrating the point of this line",
+      "asset_query": "perplexity pages",
+      "asset_query_variants": [
+        "perplexity pages",
+        "shareable research",
+        "research report",
+        "shareable research report",
+        "research laboratory equipment"
+      ],
+      "source": "ai_image",
+      "caption": "research laboratory equipment illustratin\u2026",
+      "zoom_from": 1.0,
+      "zoom_to": 1.16,
+      "pan": {
+        "x": 8.0,
+        "y": -2.0
+      },
+      "transition": "cut",
+      "sfx": "whoosh",
+      "music_gain_db": -16.0
+    },
+    {
+      "index": 11,
+      "start": 31.071,
+      "end": 33.895,
+      "duration": 2.825,
+      "visual": "research laboratory equipment illustrating the point of this line - alternate angle",
+      "asset_query": "shareable research",
+      "asset_query_variants": [
+        "perplexity pages",
+        "shareable research",
+        "research report",
+        "shareable research report",
+        "research laboratory equipment"
+      ],
+      "source": "procedural",
+      "caption": "research laboratory equipment illustratin\u2026",
+      "zoom_from": 1.04,
+      "zoom_to": 1.12,
+      "pan": {
+        "x": -4.0,
+        "y": 4.0
+      },
+      "transition": "cut",
+      "sfx": "whoosh",
+      "music_gain_db": -16.5
+    },
+    {
+      "index": 12,
+      "start": 33.895,
+      "end": 36.72,
+      "duration": 2.825,
+      "visual": "research laboratory equipment illustrating the point of this line",
+      "asset_query": "research report",
+      "asset_query_variants": [
+        "perplexity pages",
+        "shareable research",
+        "research report",
+        "shareable research report",
+        "research laboratory equipment"
+      ],
+      "source": "wikimedia",
+      "caption": "research laboratory equipment illustratin\u2026",
+      "zoom_from": 1.0,
+      "zoom_to": 1.14,
+      "pan": {
+        "x": 6.0,
+        "y": 0.0
+      },
+      "transition": "fade",
+      "sfx": "whoosh",
+      "music_gain_db": -15.0
+    }
+  ],
+  "visuals": {
+    "mode": "multi_shot_stock",
+    "asset_count": 9,
+    "asset_path": "/home/demon/shorts_studio/shots/wikimedia_000.jpg",
+    "shot_count": 13,
+    "providers": {
+      "wikimedia": 9
+    },
+    "assets": [
+      {
+        "provider": "wikimedia",
+        "title": "File:A world in perplexity (1918) (14780341531).jpg",
+        "license": "No restrictions",
+        "license_url": "https://www.flickr.com/commons/usage/",
+        "author": "Daniells, Arthur Grosvenor, 1858- [from old catalog]",
+        "credit": "https://www.flickr.com/photos/internetarchivebookimages/14780341531/ Source book page: https://archive.org/stream/worldinperplexit00dani/worldinperplexit00dani#",
+        "page_url": "https://commons.wikimedia.org/wiki/File:A_world_in_perplexity_(1918)_(14780341531).jpg",
+        "source_url": "https://upload.wikimedia.org/wikipedia/commons/2/26/A_world_in_perplexity_%281918%29_%2814780341531%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "width": 2028,
+        "height": 3004,
+        "query": "perplexity pages",
+        "path": "/home/demon/shorts_studio/shots/wikimedia_000.jpg",
+        "credit_line": "A world in perplexity (1918) (14780341531).jpg \u2014 by Daniells, Arthur Grosvenor, 1858- [from old catalog] \u2014 (No restrictions) \u2014 https://commons.wikimedia.org/wiki/File:A_world_in_perplexity_(1918)_(14780341531).jpg"
+      },
+      {
+        "provider": "wikimedia",
+        "title": "File:A world in perplexity (1918) (14783092652).jpg",
+        "license": "No restrictions",
+        "license_url": "https://www.flickr.com/commons/usage/",
+        "author": "Internet Archive Book Images",
+        "credit": "https://www.flickr.com/photos/internetarchivebookimages/14783092652/ Source book page: https://archive.org/stream/worldinperplexit00dani/worldinperplexit00dani#",
+        "page_url": "https://commons.wikimedia.org/wiki/File:A_world_in_perplexity_(1918)_(14783092652).jpg",
+        "source_url": "https://upload.wikimedia.org/wikipedia/commons/a/a1/A_world_in_perplexity_%281918%29_%2814783092652%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "width": 2000,
+        "height": 2964,
+        "query": "shareable research",
+        "path": "/home/demon/shorts_studio/shots/wikimedia_001.jpg",
+        "credit_line": "A world in perplexity (1918) (14783092652).jpg \u2014 by Internet Archive Book Images \u2014 (No restrictions) \u2014 https://commons.wikimedia.org/wiki/File:A_world_in_perplexity_(1918)_(14783092652).jpg"
+      },
+      {
+        "provider": "wikimedia",
+        "title": "File:A world in perplexity (1918) (14596740100).jpg",
+        "license": "No restrictions",
+        "license_url": "https://www.flickr.com/commons/usage/",
+        "author": "Daniells, Arthur Grosvenor, 1858- [from old catalog]",
+        "credit": "https://www.flickr.com/photos/internetarchivebookimages/14596740100/ Source book page: https://archive.org/stream/worldinperplexit00dani/worldinperplexit00dani#",
+        "page_url": "https://commons.wikimedia.org/wiki/File:A_world_in_perplexity_(1918)_(14596740100).jpg",
+        "source_url": "https://upload.wikimedia.org/wikipedia/commons/1/15/A_world_in_perplexity_%281918%29_%2814596740100%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "width": 3344,
+        "height": 2068,
+        "query": "shareable research report",
+        "path": "/home/demon/shorts_studio/shots/wikimedia_003.jpg",
+        "credit_line": "A world in perplexity (1918) (14596740100).jpg \u2014 by Daniells, Arthur Grosvenor, 1858- [from old catalog] \u2014 (No restrictions) \u2014 https://commons.wikimedia.org/wiki/File:A_world_in_perplexity_(1918)_(14596740100).jpg"
+      },
+      {
+        "provider": "wikimedia",
+        "title": "File:A world in perplexity (1918) (14596946427).jpg",
+        "license": "No restrictions",
+        "license_url": "https://www.flickr.com/commons/usage/",
+        "author": "Daniells, Arthur Grosvenor, 1858- [from old catalog]",
+        "credit": "https://www.flickr.com/photos/internetarchivebookimages/14596946427/ Source book page: https://archive.org/stream/worldinperplexit00dani/worldinperplexit00dani#",
+        "page_url": "https://commons.wikimedia.org/wiki/File:A_world_in_perplexity_(1918)_(14596946427).jpg",
+        "source_url": "https://upload.wikimedia.org/wikipedia/commons/3/3c/A_world_in_perplexity_%281918%29_%2814596946427%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "width": 3088,
+        "height": 1996,
+        "query": "research laboratory equipment",
+        "path": "/home/demon/shorts_studio/shots/wikimedia_004.jpg",
+        "credit_line": "A world in perplexity (1918) (14596946427).jpg \u2014 by Daniells, Arthur Grosvenor, 1858- [from old catalog] \u2014 (No restrictions) \u2014 https://commons.wikimedia.org/wiki/File:A_world_in_perplexity_(1918)_(14596946427).jpg"
+      },
+      {
+        "provider": "wikimedia",
+        "title": "File:A world in perplexity (1918) (14760462696).jpg",
+        "license": "No restrictions",
+        "license_url": "https://www.flickr.com/commons/usage/",
+        "author": "Daniells, Arthur Grosvenor, 1858- [from old catalog]",
+        "credit": "https://www.flickr.com/photos/internetarchivebookimages/14760462696/ Source book page: https://archive.org/stream/worldinperplexit00dani/worldinperplexit00dani#",
+        "page_url": "https://commons.wikimedia.org/wiki/File:A_world_in_perplexity_(1918)_(14760462696).jpg",
+        "source_url": "https://upload.wikimedia.org/wikipedia/commons/f/f6/A_world_in_perplexity_%281918%29_%2814760462696%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "width": 3088,
+        "height": 2000,
+        "query": "shareable research",
+        "path": "/home/demon/shorts_studio/shots/wikimedia_006.jpg",
+        "credit_line": "A world in perplexity (1918) (14760462696).jpg \u2014 by Daniells, Arthur Grosvenor, 1858- [from old catalog] \u2014 (No restrictions) \u2014 https://commons.wikimedia.org/wiki/File:A_world_in_perplexity_(1918)_(14760462696).jpg"
+      },
+      {
+        "provider": "wikimedia",
+        "title": "File:A world in perplexity (1918) (14780329691).jpg",
+        "license": "No restrictions",
+        "license_url": "https://www.flickr.com/commons/usage/",
+        "author": "Daniells, Arthur Grosvenor, 1858- [from old catalog]",
+        "credit": "https://www.flickr.com/photos/internetarchivebookimages/14780329691/ Source book page: https://archive.org/stream/worldinperplexit00dani/worldinperplexit00dani#",
+        "page_url": "https://commons.wikimedia.org/wiki/File:A_world_in_perplexity_(1918)_(14780329691).jpg",
+        "source_url": "https://upload.wikimedia.org/wikipedia/commons/8/85/A_world_in_perplexity_%281918%29_%2814780329691%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "width": 3120,
+        "height": 2048,
+        "query": "research report",
+        "path": "/home/demon/shorts_studio/shots/wikimedia_007.jpg",
+        "credit_line": "A world in perplexity (1918) (14780329691).jpg \u2014 by Daniells, Arthur Grosvenor, 1858- [from old catalog] \u2014 (No restrictions) \u2014 https://commons.wikimedia.org/wiki/File:A_world_in_perplexity_(1918)_(14780329691).jpg"
+      },
+      {
+        "provider": "wikimedia",
+        "title": "File:Ansicht einer Perplexity Page.png",
+        "license": "CC BY-SA 4.0",
+        "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
+        "author": "Suppengem\u00fcse",
+        "credit": "Own work",
+        "page_url": "https://commons.wikimedia.org/wiki/File:Ansicht_einer_Perplexity_Page.png",
+        "source_url": "https://upload.wikimedia.org/wikipedia/commons/8/88/Ansicht_einer_Perplexity_Page.png?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "width": 2336,
+        "height": 1408,
+        "query": "shareable research report",
+        "path": "/home/demon/shorts_studio/shots/wikimedia_009.png",
+        "credit_line": "Ansicht einer Perplexity Page.png \u2014 by Suppengem\u00fcse \u2014 (CC BY-SA 4.0) \u2014 https://commons.wikimedia.org/wiki/File:Ansicht_einer_Perplexity_Page.png"
+      },
+      {
+        "provider": "wikimedia",
+        "title": "File:Turkish Boy Scouts - A world in perplexity (1918) (14781122184).jpg",
+        "license": "No restrictions",
+        "license_url": "https://www.flickr.com/commons/usage/",
+        "author": "Internet Archive Book Images",
+        "credit": "https://www.flickr.com/photos/internetarchivebookimages/14781122184/ Source book page: https://archive.org/stream/worldinperplexit00dani/worldinperplexit00dani#",
+        "page_url": "https://commons.wikimedia.org/wiki/File:Turkish_Boy_Scouts_-_A_world_in_perplexity_(1918)_(14781122184).jpg",
+        "source_url": "https://upload.wikimedia.org/wikipedia/commons/7/77/Turkish_Boy_Scouts_-_A_world_in_perplexity_%281918%29_%2814781122184%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "width": 1869,
+        "height": 1338,
+        "query": "perplexity pages",
+        "path": "/home/demon/shorts_studio/shots/wikimedia_010.jpg",
+        "credit_line": "Turkish Boy Scouts - A world in perplexity (1918) (14781122184).jpg \u2014 by Internet Archive Book Images \u2014 (No restrictions) \u2014 https://commons.wikimedia.org/wiki/File:Turkish_Boy_Scouts_-_A_world_in_perplexity_(1918)_(14781122184).jpg"
+      },
+      {
+        "provider": "wikimedia",
+        "title": "File:A world in perplexity (1918) (14780341531).jpg",
+        "license": "No restrictions",
+        "license_url": "https://www.flickr.com/commons/usage/",
+        "author": "Daniells, Arthur Grosvenor, 1858- [from old catalog]",
+        "credit": "https://www.flickr.com/photos/internetarchivebookimages/14780341531/ Source book page: https://archive.org/stream/worldinperplexit00dani/worldinperplexit00dani#",
+        "page_url": "https://commons.wikimedia.org/wiki/File:A_world_in_perplexity_(1918)_(14780341531).jpg",
+        "source_url": "https://upload.wikimedia.org/wikipedia/commons/2/26/A_world_in_perplexity_%281918%29_%2814780341531%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "width": 2028,
+        "height": 3004,
+        "query": "research report",
+        "path": "/home/demon/shorts_studio/shots/wikimedia_012.jpg",
+        "credit_line": "A world in perplexity (1918) (14780341531).jpg \u2014 by Daniells, Arthur Grosvenor, 1858- [from old catalog] \u2014 (No restrictions) \u2014 https://commons.wikimedia.org/wiki/File:A_world_in_perplexity_(1918)_(14780341531).jpg"
+      }
+    ],
+    "credits": [
+      "A world in perplexity (1918) (14780341531).jpg \u2014 by Daniells, Arthur Grosvenor, 1858- [from old catalog] \u2014 (No restrictions) \u2014 https://commons.wikimedia.org/wiki/File:A_world_in_perplexity_(1918)_(14780341531).jpg",
+      "A world in perplexity (1918) (14783092652).jpg \u2014 by Internet Archive Book Images \u2014 (No restrictions) \u2014 https://commons.wikimedia.org/wiki/File:A_world_in_perplexity_(1918)_(14783092652).jpg",
+      "A world in perplexity (1918) (14596740100).jpg \u2014 by Daniells, Arthur Grosvenor, 1858- [from old catalog] \u2014 (No restrictions) \u2014 https://commons.wikimedia.org/wiki/File:A_world_in_perplexity_(1918)_(14596740100).jpg",
+      "A world in perplexity (1918) (14596946427).jpg \u2014 by Daniells, Arthur Grosvenor, 1858- [from old catalog] \u2014 (No restrictions) \u2014 https://commons.wikimedia.org/wiki/File:A_world_in_perplexity_(1918)_(14596946427).jpg",
+      "A world in perplexity (1918) (14760462696).jpg \u2014 by Daniells, Arthur Grosvenor, 1858- [from old catalog] \u2014 (No restrictions) \u2014 https://commons.wikimedia.org/wiki/File:A_world_in_perplexity_(1918)_(14760462696).jpg",
+      "A world in perplexity (1918) (14780329691).jpg \u2014 by Daniells, Arthur Grosvenor, 1858- [from old catalog] \u2014 (No restrictions) \u2014 https://commons.wikimedia.org/wiki/File:A_world_in_perplexity_(1918)_(14780329691).jpg",
+      "Ansicht einer Perplexity Page.png \u2014 by Suppengem\u00fcse \u2014 (CC BY-SA 4.0) \u2014 https://commons.wikimedia.org/wiki/File:Ansicht_einer_Perplexity_Page.png",
+      "Turkish Boy Scouts - A world in perplexity (1918) (14781122184).jpg \u2014 by Internet Archive Book Images \u2014 (No restrictions) \u2014 https://commons.wikimedia.org/wiki/File:Turkish_Boy_Scouts_-_A_world_in_perplexity_(1918)_(14781122184).jpg",
+      "A world in perplexity (1918) (14780341531).jpg \u2014 by Daniells, Arthur Grosvenor, 1858- [from old catalog] \u2014 (No restrictions) \u2014 https://commons.wikimedia.org/wiki/File:A_world_in_perplexity_(1918)_(14780341531).jpg"
+    ]
+  },
+  "captions": {
+    "word_count": 84,
+    "timing_source": "transcribed",
+    "path": "/home/demon/shorts_studio/subtitles.ass"
+  },
+  "critic": {
+    "score": 100.0,
+    "pass": true,
+    "issues": [],
+    "slop_score": 0.0
+  },
+  "slop_score": 0.0,
+  "research": {
+    "verdict": "sufficient",
+    "claims": [
+      {
+        "claim": "Products Products Products Kimi Kimi Work Kimi Code Kimi Browser Extension Downloads All products Features Build AI app & website builder Slides AI presentation maker Docs AI document agent Sheets AI spreadsheet agent Deep Research AI research agent All features Models Kimi K3 New Kimi K2.7 Code Kimi K2.6 Kimi K2.5 All models API API Use Cases Use Cases Featured use cases Build MVP sites Create portfolio sites Build blog sites Conduct academic research Conduct market research Create resumes Create brochures All use cases Featured tools AI landing page generator Image to website AI document generator PDF to PPT converter PDF translator AI Python code generator AI C++ code generator All capabilities Showcases Websites Agent Swarm Deep Research Slides Sheets Docs Design All showcases Business Business Kimi Business Business plans Contact sales Research Research Kimi K3.1 Pro Kimi K3 PerceptionBench Kimi K2.6 Agent Swarm WorldVQA Kimi K2.5 Kimi Vendor Verifier Kimi K2 Thinking Kimi K2 All research Resources Resources Support & docs Help center Kimi Code docs Academy Kimi Work 101 Kimi Code 101 All tutorials Articles AI agents explained Multi-agent systems Parallel agents What is vibe coding Build a landing page Create a poster Write a business proposal All articles Pricing Pricing Download Download Download Download Try Kimi Scroll to explore Introducing Kimi K3.1 Pro We're introducing Kimi K3.1 Pro , the first model in our new K3.1 series and our most capable 3T-class open-weight model to date, with a 1-million-token context window.",
+        "quote": "Products Products Products Kimi Kimi Work Kimi Code Kimi Browser Extension Downloads All products Features Build AI app & website builder Slides AI presentation maker Docs AI document agent Sheets AI spreadsheet agent Deep Research AI research agent All features Models Kimi K3 New Kimi K2.7 Code Kimi K2.6 Kimi K2.5 All models API API Use Cases Use Cases Featured use cases Build MVP sites Create portfolio sites Build blog sites Conduct academic research Conduct market research Create resumes Create brochures All use cases Featured tools AI landing page generator Image to website AI document generator PDF to PPT converter PDF translator AI Python code generator AI C++ code generator All capabilities Showcases Websites Agent Swarm Deep Research Slides Sheets Docs Design All showcases Business Business Kimi Business Business plans Contact sales Research Research Kimi K3.1 Pro Kimi K3 PerceptionBench Kimi K2.6 Agent Swarm WorldVQA Kimi K2.5 Kimi Vendor Verifier Kimi K2 Thinking Kimi K2 All research Resources Resources Support & docs Help center Kimi Code docs Academy Kimi Work 101 Kimi Code 101 All tutorials Articles AI agents explained Multi-agent systems Parallel agents What is vibe coding Build a landing page Create a poster Write a business proposal All articles Pricing Pricing Download Download Download Download Try Kimi Scroll to explore Introducing Kimi K3.1 Pro We're introducing Kimi K3.1 Pro , the first model in our new K3.1 series and our most capable 3T-class open-weight model to date, with a 1-million-token context window.",
+        "source_url": "https://www.kimi.ai/blog/kimi-k3-1-pro",
+        "confidence": 0.7
+      },
+      {
+        "claim": "We are also releasing Kimi K3.1 Pro Highspeed , which delivers 2-3\u00d7 the speed of K3.1 Pro for more responsive interactions.",
+        "quote": "We are also releasing Kimi K3.1 Pro Highspeed , which delivers 2-3\u00d7 the speed of K3.1 Pro for more responsive interactions.",
+        "source_url": "https://www.kimi.ai/blog/kimi-k3-1-pro",
+        "confidence": 0.7
+      },
+      {
+        "claim": "Kimi K3.1 Pro and Kimi K3.1 Pro Highspeed are available today on Kimi.ai , Kimi Work , Kimi Code , and the Kimi API .",
+        "quote": "Kimi K3.1 Pro and Kimi K3.1 Pro Highspeed are available today on Kimi.ai , Kimi Work , Kimi Code , and the Kimi API .",
+        "source_url": "https://www.kimi.ai/blog/kimi-k3-1-pro",
+        "confidence": 0.7
+      },
+      {
+        "claim": "The full model weights will be released by Nov 4.",
+        "quote": "The full model weights will be released by Nov 4.",
+        "source_url": "https://www.kimi.ai/blog/kimi-k3-1-pro",
+        "confidence": 0.7
+      },
+      {
+        "claim": "Advancing the Frontier of Open Intelligence Kimi K3.1 Pro is a post-trained version of Kimi K3, with substantially larger post-training compute.",
+        "quote": "Advancing the Frontier of Open Intelligence Kimi K3.1 Pro is a post-trained version of Kimi K3, with substantially larger post-training compute.",
+        "source_url": "https://www.kimi.ai/blog/kimi-k3-1-pro",
+        "confidence": 0.7
+      },
+      {
+        "claim": "As a result, K3.1 Pro achieves consistent gains in every domain.",
+        "quote": "As a result, K3.1 Pro achieves consistent gains in every domain.",
+        "source_url": "https://www.kimi.ai/blog/kimi-k3-1-pro",
+        "confidence": 0.7
+      },
+      {
+        "claim": "Across coding, agentic, and knowledge benchmarks, K3.1 Pro matches or approaches the strongest proprietary models.",
+        "quote": "Across coding, agentic, and knowledge benchmarks, K3.1 Pro matches or approaches the strongest proprietary models.",
+        "source_url": "https://www.kimi.ai/blog/kimi-k3-1-pro",
+        "confidence": 0.7
+      },
+      {
+        "claim": "On Terminal-Bench 4.0 , which evaluates coding agents on realistic, resource-constrained terminal tasks using strict task-specific tests, K3.1 Pro scores 65.7%, ahead of GPT-6 Astra (58.2%) and narrowly behind Claude Opus 5.5 (66.4%) .",
+        "quote": "On Terminal-Bench 4.0 , which evaluates coding agents on realistic, resource-constrained terminal tasks using strict task-specific tests, K3.1 Pro scores 65.7%, ahead of GPT-6 Astra (58.2%) and narrowly behind Claude Opus 5.5 (66.4%) .",
+        "source_url": "https://www.kimi.ai/blog/kimi-k3-1-pro",
+        "confidence": 0.7
+      },
+      {
+        "claim": "And on Kimi Code Bench 3.0 Long-horizon , our internal benchmark that tests coding agents' multi-step execution, tool use, and end-to-end problem solving across diverse engineering domains, K3.1 Pro scores 61.2% , above K3's 55.95% .",
+        "quote": "And on Kimi Code Bench 3.0 Long-horizon , our internal benchmark that tests coding agents' multi-step execution, tool use, and end-to-end problem solving across diverse engineering domains, K3.1 Pro scores 61.2% , above K3's 55.95% .",
+        "source_url": "https://www.kimi.ai/blog/kimi-k3-1-pro",
+        "confidence": 0.7
+      },
+      {
+        "claim": "Coding K3.1 Pro covers the full range of coding work, from quick fixes in real codebases to full-project builds.",
+        "quote": "Coding K3.1 Pro covers the full range of coding work, from quick fixes in real codebases to full-project builds.",
+        "source_url": "https://www.kimi.ai/blog/kimi-k3-1-pro",
+        "confidence": 0.7
+      },
+      {
+        "claim": "K3.1 Pro works effectively across game engines such as Unity, Unreal Engine, and Godot , combining them with web search and 3D generation to create complete experiences.",
+        "quote": "K3.1 Pro works effectively across game engines such as Unity, Unreal Engine, and Godot , combining them with web search and 3D generation to create complete experiences.",
+        "source_url": "https://www.kimi.ai/blog/kimi-k3-1-pro",
+        "confidence": 0.7
+      },
+      {
+        "claim": "The examples below were created end to end by K3.1 Pro: K3.1 Pro's long-horizon coding capabilities are also strengthened through large-scale reinforcement learning.",
+        "quote": "The examples below were created end to end by K3.1 Pro: K3.1 Pro's long-horizon coding capabilities are also strengthened through large-scale reinforcement learning.",
+        "source_url": "https://www.kimi.ai/blog/kimi-k3-1-pro",
+        "confidence": 0.7
+      },
+      {
+        "claim": "In one internal test, it built a human walking dynamics simulator with integrated training and evaluation pipelines on top of human-atlas , an open-source anatomical model of the human body comprising 296 skeletal components, including cartilage, and 402 muscle components.",
+        "quote": "In one internal test, it built a human walking dynamics simulator with integrated training and evaluation pipelines on top of human-atlas , an open-source anatomical model of the human body comprising 296 skeletal components, including cartilage, and 402 muscle components.",
+        "source_url": "https://www.kimi.ai/blog/kimi-k3-1-pro",
+        "confidence": 0.7
+      },
+      {
+        "claim": "Across 167 missions and 420 independent reviews, it analyzed experimental results, diagnosed problems, and iteratively refined the walking controller, enabling the simulated human to go from collapsing within seconds to walking continuously with alternating strides for 11.2 seconds.",
+        "quote": "Across 167 missions and 420 independent reviews, it analyzed experimental results, diagnosed problems, and iteratively refined the walking controller, enabling the simulated human to go from collapsing within seconds to walking continuously with alternating strides for 11.2 seconds.",
+        "source_url": "https://www.kimi.ai/blog/kimi-k3-1-pro",
+        "confidence": 0.7
+      }
+    ],
+    "contradictions": [],
+    "unsupported_numbers": [],
+    "limitations": [
+      "The reported rates do not represent overall error rates in daily use.) The cases below show how K3.1 Pro handles financial modeling, investment analysis, and source-grounded research in practice: Cybersecurity As K3.1 Pro became more capable, we spent a correspondingly larger share of our effort understanding where cyber capability comes from, and how much of it we can control.",
+      "The laws do not adequately respect minors\u2019 rights to play, speak, and learn online."
+    ],
+    "sources": [
+      {
+        "url": "https://block.xyz/dessa",
+        "ok": true,
+        "title": "Dessa - the Conversation Model trained only on speech",
+        "published": "",
+        "publisher": "block.xyz"
+      },
+      {
+        "url": "https://www.kimi.ai/blog/kimi-k3-1-pro",
+        "ok": true,
+        "title": "Kimi K3.1 Pro Tech Blog: Advancing Open Intelligence",
+        "published": "",
+        "publisher": "www.kimi.ai"
+      },
+      {
+        "url": "https://blog.calif.io/p/iphone",
+        "ok": true,
+        "title": "iPhone - Calif Newsletter",
+        "published": "",
+        "publisher": "blog.calif.io"
+      },
+      {
+        "url": "https://www.theverge.com/tech/1017600/google-personal-intelligence-privacy-policy-ads-update",
+        "ok": true,
+        "title": "Now Google says it might use your Gmail and Google Photos data to target ads | The VergeThe VergeThe VergeNotificationsNotificationsHamburger Navigation ButtonThe VergeNotificationsNotificationsHamburger Navigation ButtonThe VergeCloseExpandExpandExpandExpandExpandExpandExpandExpandExpandExpandExpandExpandExpandFacebookThreadsInstagramYoutubeRSSThe VergeNotificationsNotificationsNotificationsCloseFollowCloseFollowCloseFollowCloseFollowLinkShareGiftCloseFollowCloseFollowCloseFollowCloseFollowCloseFollowCloseFollowThe VergeFacebookThreadsInstagramYoutubeRSSThe Verge",
+        "published": "",
+        "publisher": "www.theverge.com"
+      },
+      {
+        "url": "https://www.eff.org/deeplinks/2026/10/canadians-are-running-out-time-oppose-dangerous-c-22-surveillance-bill",
+        "ok": true,
+        "title": "Canadians Are Running Out Of Time To Oppose The Dangerous C-22 Surveillance Bill | Electronic Frontier Foundation",
+        "published": "",
+        "publisher": "www.eff.org"
+      }
+    ]
+  },
+  "topic_selection": {
+    "score": 75.3,
+    "angle": "Show how to turn a messy Perplexity search into a clean, shareable PDF in under a minute.",
+    "method": "explicit topic requested by the caller",
+    "rejected": []
+  },
+  "voice": {
+    "provider": "edge_tts",
+    "duration": 36.72
+  },
+  "steps": [
+    {
+      "step": "topic",
+      "topic": "Using Perplexity Pages to create a shareable research report",
+      "score": 75.3,
+      "angle": "Show how to turn a messy Perplexity search into a clean, shareable PDF in under a minute.",
+      "pillar": "AI You Can Use"
+    },
+    {
+      "step": "research",
+      "verdict": "sufficient",
+      "claims": 14,
+      "sources": 5,
+      "contradictions": 0,
+      "limitations": 2
+    },
+    {
+      "step": "script",
+      "title": "Kimi K3.1 Pro: 1M Token Context",
+      "words": 83,
+      "archetype": "curiosity_gap",
+      "slop": 0.0,
+      "rewrites": 0
+    },
+    {
+      "step": "shots",
+      "count": 13,
+      "avg_shot": 2.83,
+      "sources": {
+        "wikimedia": 5,
+        "ai_image": 4,
+        "procedural": 4
+      }
+    },
+    {
+      "step": "render",
+      "path": "/home/demon/shorts_studio/output_short.mp4",
+      "duration": 36.72,
+      "shots": 13,
+      "music": "/home/demon/shorts_studio/shots/music_bed.wav",
+      "sfx": 13
+    }
+  ],
+  "elapsed_seconds": 396.0,
+  "video_path": "/home/demon/shorts_studio/output_short.mp4"
+}

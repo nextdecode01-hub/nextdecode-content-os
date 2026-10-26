@@ -1,0 +1,177 @@
+{
+  "id": "aibl9NX61mKH9z5m",
+  "name": "NEXTDECODE - Full Content Flow (Research to Approved Publish)",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 12 * * *"
+            }
+          ]
+        }
+      },
+      "id": "49f606ec-9cf0-476b-9d0d-f818764781f6",
+      "name": "Generate and Queue Daily Content (12:00 IST)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -460,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://studio-runner:8080/run/generate",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.N8N_RUNNER_API_KEY }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 14400000
+        }
+      },
+      "id": "5717b5d9-752f-46c9-bdca-1e677ecdd350",
+      "name": "Run Secure Generation Pipeline (Review Only)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -180,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 20 * * *"
+            }
+          ]
+        }
+      },
+      "id": "31bbbf2d-83f3-493c-a3f0-492d383c5f09",
+      "name": "Check Owner-Approved Uploads (20:00 IST)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -460,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://studio-runner:8080/run/publish",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.N8N_RUNNER_API_KEY }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 14400000
+        }
+      },
+      "id": "f79a1124-d553-491f-a54b-5086159bc732",
+      "name": "Run Approval-Gated Publisher",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -180,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 12:00 IST - Research and production\n\n**Short, every day**\n1. Discover and rank current topics; avoid recently used ideas.\n2. Generate an original script and platform copy using the configured AI provider.\n3. Create narration, captions and visuals; render with FFmpeg and run media-quality checks.\n4. Build a review package tied to the exact video and metadata hashes.\n5. Send a private Telegram review reminder. This is review-only; generation never uploads.\n\n**Long-form, Wednesday and Saturday**\nThe same scheduled runner also creates a 2-10 minute research-led video, packages it for review and sends a separate reminder. It remains draft-only until owner review.",
+        "height": 450,
+        "width": 460,
+        "color": 5
+      },
+      "id": "b8622ea8-87e0-46be-89ee-d512bcf412c2",
+      "name": "Visible Flow - Research, AI, Voice, Visuals and Review",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        170,
+        -300
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 20:00 IST - Approval-gated publishing\n\nThe publisher checks the local IST upload window, fresh metadata, same-day approval, exact SHA-256 hashes, content checks and publishable visual assets before any upload.\n\n- Shorts: preflight all configured destinations (YouTube, Facebook and Instagram) before cross-posting.\n- Long-form: YouTube upload is checked on Wednesday and Saturday.\n- Missing, expired or mismatched approval means no upload.\n- Missing platform credentials or media hosting blocks that destination; never bypass this gate to test an integration.",
+        "height": 360,
+        "width": 460,
+        "color": 6
+      },
+      "id": "d9b03a1e-1799-45b7-a850-4022d276289a",
+      "name": "Visible Flow - Review Gate and Platform Publishing",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        170,
+        210
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Integrations and credential boundary\n\nn8n calls a private `studio-runner` service over the Compose network. The runner exposes only two fixed operations: review-only content generation and the existing approval-gated publishing check. It accepts no arbitrary commands, is not published to the host, and requires a random bearer key.\n\nThe runner mounts the private project `.env` and YouTube OAuth token; n8n does not receive those platform credentials. AI generation, YouTube OAuth, Telegram, Edge TTS and FFmpeg are handled by the project scripts. Facebook/Instagram still need their account tokens and public video hosting. Run `setup_check.py` for the current readiness report.",
+        "height": 360,
+        "width": 460,
+        "color": 7
+      },
+      "id": "f21f1ed8-159a-47ef-8cd8-30fd815a387c",
+      "name": "Visible Flow - Internal Runner and Credential Boundary",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        670,
+        -40
+      ]
+    }
+  ],
+  "connections": {
+    "Generate and Queue Daily Content (12:00 IST)": {
+      "main": [
+        [
+          {
+            "node": "Run Secure Generation Pipeline (Review Only)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Owner-Approved Uploads (20:00 IST)": {
+      "main": [
+        [
+          {
+            "node": "Run Approval-Gated Publisher",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Kolkata",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "988f0a4e-19aa-4f81-902a-f37a41d1d685"
+}

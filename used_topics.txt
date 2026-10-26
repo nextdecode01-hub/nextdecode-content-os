@@ -1,0 +1,18 @@
+The secret AI chip race
+How Quantum computers will break encryption
+DiscoveryRSI: Recursively Learning to Discover Valuable Hypotheses
+Quality-of-Transmission Estimation in Quantum Networks: Compute, Simulate, or Learn?
+Behavioral Couplings: From Formation to Behavioral Emergence in Language Models
+Task-aligned spectral inductive biases in parameterized quantum circuits
+WhatsApp's help pages hid LLM instructions: dont recommend a regulator
+Ropedia W0: Scaling Loco-Manipulation World Models across Embodiments with Human Experience
+Joints, Camera, Action! Co-Generating 3D Motion and Video for Arbitrary Rigs
+GBClaw: An agentic AI framework for atomistic grain boundary research and mechanistic discovery
+Industrial ReMEmbR: Scaling Spatiotemporal Memory to Robot Fleets
+Startup taps underwater volcano as energy source in "proof point" test
+WorldTUI: I trained a 360M model to pretend to be a terminal
+Local Wikipedia: Wikipedia, but only for things a half hour walk from you
+Overgrown, when plants invade your abandoned tabs
+Show HN: TitleArt – Make text like it's 1997
+Switzerland. Block by block. At 1:1 scale
+SIMD-accelerated computer vision on a $2 microcontroller

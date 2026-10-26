@@ -1,0 +1,62 @@
+name: nextdecode-studio
+
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:1.97.1
+    restart: unless-stopped
+    depends_on:
+      studio-runner:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:5678:5678"
+    environment:
+      TZ: Asia/Kolkata
+      GENERIC_TIMEZONE: Asia/Kolkata
+      N8N_HOST: localhost
+      N8N_PROTOCOL: http
+      N8N_PORT: "5678"
+      WEBHOOK_URL: http://localhost:5678/
+      N8N_EDITOR_BASE_URL: http://localhost:5678/
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      N8N_RUNNER_API_KEY: ${N8N_RUNNER_API_KEY:?Set N8N_RUNNER_API_KEY in .n8n-docker.env}
+    volumes:
+      - /home/demon/.n8n:/home/node/.n8n
+      - ./workflow_n8n_approved_schedule.json:/tmp/workflow_n8n_approved_schedule.json:ro
+
+  studio-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile.runner
+    restart: unless-stopped
+    user: "1000:1000"
+    environment:
+      TZ: Asia/Kolkata
+      STUDIO_ROOT: /home/demon/shorts_studio
+      SHORTS_STUDIO_PYTHON: /usr/local/bin/python
+      N8N_RUNNER_API_KEY: ${N8N_RUNNER_API_KEY:?Set N8N_RUNNER_API_KEY in .n8n-docker.env}
+      RUNNER_COMMAND_TIMEOUT_SECONDS: "14400"
+      OMNIROUTE_BASE_URL: ${OMNIROUTE_BASE_URL_CONTAINER:-http://host.docker.internal:20128/v1}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL_CONTAINER:-http://host.docker.internal:11434}
+    volumes:
+      - ./:/home/demon/shorts_studio
+      - studio-model-cache:/home/runner/.cache
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=1g
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=2)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  studio-model-cache:
