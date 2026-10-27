@@ -221,6 +221,75 @@ def run_strong_pipeline(topic: str, work_dir: Path, metadata_file: Path) -> dict
     return data
 
 
+DRY_RUN_TEXT = (
+    "Local dry run proves the short pipeline can move from script to voice to background "
+    "to captions to a checked vertical render without calling a paid model. Every stage "
+    "uses local tools: ffmpeg creates a silent voice track and a procedural background, "
+    "while the existing caption and quality checks run exactly as they do in production. "
+    "The video is not publishable because it has no real narration or stock footage, but "
+    "the file structure, duration, audio stream, and resolution are verified. This run "
+    "also confirms that the target-tree entrypoint imports resolve. No API key was read, "
+    "no research request was sent, and no upload or approval step was triggered. Keep the "
+    "dry run separate from production metadata and review queues."
+)
+
+
+def _dry_run_background(output_path: Path, duration: float) -> None:
+    seconds = int(duration) + 3
+    subprocess.run([
+        "ffmpeg", "-y", "-f", "lavfi",
+        "-i", f"color=c=0x070b14:s=720x1280:r=30:d={seconds}",
+        "-vf", "noise=alls=6:allf=t+u,drawgrid=width=90:height=90:thickness=1:color=0x22d3ee@0.10",
+        "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+        "-t", str(seconds), str(output_path),
+    ], check=True)
+
+
+def run_dry_run(work_dir: Path, metadata_file: Path) -> dict:
+    """Exercise the local render path without LLM, research, stock, or upload calls."""
+    from app.voice import provider as voice_provider
+    import motion_render
+
+    work_dir.mkdir(parents=True, exist_ok=True)
+    audio_path = work_dir / "voice.mp3"
+    background_path = work_dir / "background.mp4"
+    ass_path = work_dir / "subtitles.ass"
+    video_path = work_dir / "output_short.mp4"
+
+    print("[*] DRY_RUN=1: skipping LLM, research, stock, archive, and upload stages.")
+    voice = voice_provider.synthesize(DRY_RUN_TEXT, audio_path, provider="silent")
+    if not voice.get("path"):
+        raise RuntimeError(f"Dry-run silent voice failed: {voice.get('error')}")
+    duration = float(voice_provider.probe_duration(audio_path) or voice.get("duration_hint") or 0)
+    if duration <= 0:
+        raise RuntimeError("Dry-run voice track has no measurable duration.")
+
+    _dry_run_background(background_path, duration)
+    words = strong_pipeline.estimated_words(DRY_RUN_TEXT, duration)
+    motion_render.make_kinetic_ass(words, ass_path)
+    render_final_short(background_path, audio_path, ass_path, video_path)
+
+    metadata = {
+        "dry_run": True,
+        "quality": "dry_run",
+        "title": "DRY RUN - local pipeline check",
+        "topic": "DRY_RUN local verification",
+        "hook": "Local dry run proves the short pipeline can move from script to voice to background to captions to a checked vertical render without calling a paid model.",
+        "voice_text": DRY_RUN_TEXT,
+        "word_count": len(DRY_RUN_TEXT.split()),
+        "duration_seconds": duration,
+        "broll_query": "local procedural background",
+        "visuals": {"mode": "procedural_dry_run", "asset_count": 0},
+        "human_review_status": "not_for_publish",
+        "source_urls": [],
+        "video_path": str(video_path),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    metadata_file.parent.mkdir(parents=True, exist_ok=True)
+    metadata_file.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+    return metadata
+
+
 def main():
     parser = argparse.ArgumentParser(description="Autonomous Shorts & Reels Generator")
     parser.add_argument("--topic", type=str, default="", help="Specific topic or keyword")
@@ -246,6 +315,21 @@ def main():
     output_mp4 = work_dir / "output_short.mp4"
     metadata_file = SCRIPT_DIR / "data" / "metadata.json"
     metadata_file.parent.mkdir(parents=True, exist_ok=True)
+
+    if os.getenv("DRY_RUN", "").strip().lower() in {"1", "true", "yes"}:
+        dry_dir = work_dir / "dry_run"
+        dry_metadata = SCRIPT_DIR / "data" / "metadata_dry_run.json"
+        data = run_dry_run(dry_dir, dry_metadata)
+        print(json.dumps({
+            "status": "success",
+            "dry_run": True,
+            "title": data["title"],
+            "video_path": data["video_path"],
+            "duration_seconds": data["duration_seconds"],
+            "word_count": data["word_count"],
+            "metadata_path": str(dry_metadata),
+        }))
+        return
 
     if args.quality == "strong":
         try:

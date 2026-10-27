@@ -6,6 +6,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 from app.script import longform, pipeline, short, studio, voice_guide
 from pipelines import longform as longform_pipeline
@@ -98,6 +99,28 @@ def test_shell_scripts_call_new_entrypoints() -> None:
     assert "pipelines/short.py" in (ROOT / "run_pipeline.sh").read_text(encoding="utf-8")
     assert "pipelines/longform.py" in (ROOT / "run_longform_pipeline.sh").read_text(encoding="utf-8")
     assert "app.script.pipeline" in (ROOT / "run_gen.sh").read_text(encoding="utf-8")
+
+
+def test_dry_run_uses_local_voice_and_writes_separate_metadata(tmp_path) -> None:
+    audio = tmp_path / "voice.mp3"
+    audio.write_bytes(b"local-test-audio")
+    with (
+        patch(
+            "app.voice.provider.synthesize",
+            return_value={"path": str(audio), "provider": "silent", "duration_hint": 30.0},
+        ) as synthesize,
+        patch("app.voice.provider.probe_duration", return_value=30.0),
+        patch.object(short_pipeline, "_dry_run_background"),
+        patch.object(short_pipeline, "render_final_short"),
+        patch("motion_render.make_kinetic_ass"),
+    ):
+        metadata = short_pipeline.run_dry_run(tmp_path / "work", tmp_path / "metadata_dry_run.json")
+
+    synthesize.assert_called_once()
+    assert synthesize.call_args.kwargs["provider"] == "silent"
+    assert metadata["dry_run"] is True
+    assert metadata["human_review_status"] == "not_for_publish"
+    assert (tmp_path / "metadata_dry_run.json").is_file()
 
 
 def test_setup_check_reports_new_module_paths() -> None:

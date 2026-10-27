@@ -270,6 +270,8 @@ imports or keep compatibility shims.
 | File | Referenced by | Target |
 |---|---|---|
 | `metadata.json` | `create_short` writes; review/approve/publish/upload read | `data/` |
+| `metadata_dry_run.json` | `DRY_RUN=1` in `pipelines/short.py`; never read by publish paths | `data/` |
+| `outputs/dry_run/*` | `DRY_RUN=1` local render (`voice.mp3`, `background.mp4`, `subtitles.ass`, `output_short.mp4`) | `outputs/` |
 | `metadata_strong.json` | `strong_pipeline` / `run_gen.sh` | `data/` |
 | `longform_metadata.json` | `create_longform` writes; review/approve/upload read | `data/` |
 | `review_pending.json` | `review_bundle` writes; `approve_review`, `notify_review` read | `data/` |

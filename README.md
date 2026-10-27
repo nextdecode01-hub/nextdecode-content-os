@@ -117,6 +117,12 @@ Start the WSL-installed gateway in WSL with `export PATH="$HOME/.local/bin:$PATH
 
 The script generates a fresh video and then creates a review package. The scheduled path always sets `PUBLISH_MODE=review`; it never uploads during generation. The optional `--topic` argument can request a current AI/technology topic. Generation fails closed if it cannot find a fresh source or produce a valid 70–90 word script and a render that passes duration, portrait-resolution, and audio checks.
 
+Verify the local render path without any paid API, LLM, research, stock-footage, archive, or upload call:
+
+    DRY_RUN=1 ./venv/bin/python pipelines/short.py
+
+This writes `outputs/dry_run/output_short.mp4` and `data/metadata_dry_run.json`. It uses a silent local voice track and a procedural background, then runs the normal caption and video QA checks. The output is marked `not_for_publish`; production `data/metadata.json` and review queues are not touched.
+
 ## Daily review and upload schedule
 
 At 12:00 IST, the workflow queues a Short for review; on Wednesday and Saturday it also queues a 2–10 minute long-form video (8 minutes by default). Telegram review messages include a Windows-accessible local preview and a PowerShell command that asks the owner to confirm the review checklist. Run the command only after watching the full video and checking the listed evidence, visuals, and publishing copy. A declined answer cancels approval.
