@@ -12,7 +12,7 @@ import model_health
 import motion_director
 from app.script import studio as script_studio
 import stock_fetcher
-import strong_pipeline
+from app.script import pipeline as strong_pipeline
 
 
 class TestAssetQueryBuilding(unittest.TestCase):

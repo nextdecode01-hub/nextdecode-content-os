@@ -4,7 +4,7 @@ Nextdecode turns one trending topic into one short. This module is the
 discovery half of that pipeline: it gathers trending candidates from many
 free-first sources, proves that a topic is *corroborated* across platforms,
 tracks how fast each topic is *moving*, and turns the result into a heat
-score that ``create_short.py`` can consume.
+score that ``app/script/short.py`` can consume.
 
 Design rules
 ------------

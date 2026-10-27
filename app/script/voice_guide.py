@@ -580,7 +580,7 @@ def _compile(entry: dict) -> dict:
 SLOP_PATTERNS: list[dict] = [_compile(entry) for entry in BANNED_PHRASES]
 
 # ---------------------------------------------------------------------------
-# Generic hook openers - create_short.py's six plus more
+# Generic hook openers - app/script/short.py's six plus more
 # ---------------------------------------------------------------------------
 GENERIC_HOOK_PREFIXES = (
     "today we",

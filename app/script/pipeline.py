@@ -1,6 +1,6 @@
 """Strong editorial pipeline for short-form video.
 
-The legacy path in :mod:`create_short` produces one LLM call, one background
+The legacy path in :mod:`pipelines.short` produces one LLM call, one background
 clip, and flat captions.  This module wires the stronger chain together:
 
 ``topic_selector`` -> ``research_desk`` -> ``script_studio`` -> ``voice_provider``
@@ -27,7 +27,7 @@ from app.research import desk as research_desk
 from app.research import selector as topic_selector
 from app.research.topics import discover_topics
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CANDIDATE_LIMIT = 12
 DEFAULT_MIN_TOPIC_SCORE = 55
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "base").strip() or "base"

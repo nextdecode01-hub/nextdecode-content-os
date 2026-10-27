@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import multi_model_ai
 from app.script import longform as longform_script
-import create_short
+from app.script import short as create_short
 
 
 class GenerateJsonTests(unittest.TestCase):

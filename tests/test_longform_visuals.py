@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-import create_longform
+from pipelines import longform as create_longform
 
 
 class FakeResponse:
@@ -59,7 +59,7 @@ class LongformVisualTests(unittest.TestCase):
             })
             download = FakeResponse(chunks=[b"x" * 120_000])
             with patch.object(create_longform, "PEXELS_API_KEY", "test-key"), patch(
-                "create_longform.requests.get",
+                "pipelines.longform.requests.get",
                 side_effect=[search, download],
             ) as get:
                 result = create_longform._find_pexels_clip("research technology", destination, set())
@@ -80,7 +80,7 @@ class LongformVisualTests(unittest.TestCase):
             for index in (0, 1, 3, 4)
             for take in (1, 2)
         ]
-        with patch("create_longform.subprocess.run") as run:
+        with patch("pipelines.longform.subprocess.run") as run:
             create_longform._render_stock_sequence(clips, chapters, Path("background.mp4"), 300)
 
         command = run.call_args.args[0]
@@ -95,7 +95,7 @@ class LongformVisualTests(unittest.TestCase):
             with patch.object(create_longform, "ROOT", Path(temporary)), patch.object(
                 create_longform, "PIXABAY_API_KEY", "private-test-key"
             ), patch(
-                "create_longform.requests.get",
+                "pipelines.longform.requests.get",
                 return_value=FakeResponse({"hits": hits}),
             ) as get:
                 first = create_longform._pixabay_search_results("research technology")
@@ -152,7 +152,7 @@ class LongformVisualTests(unittest.TestCase):
         ), patch.object(create_longform, "PEXELS_API_KEY", ""), patch.object(
             create_longform, "PIXABAY_API_KEY", "private-test-key"
         ), patch(
-            "create_longform._find_pixabay_clip",
+            "pipelines.longform._find_pixabay_clip",
             side_effect=[
                 {
                     "video_id": index,
@@ -163,7 +163,7 @@ class LongformVisualTests(unittest.TestCase):
                 }
                 for index in range(8)
             ],
-        ), patch("create_longform._render_stock_sequence") as render:
+        ), patch("pipelines.longform._render_stock_sequence") as render:
             result = create_longform.landscape_background(
                 "technology research",
                 Path(temporary) / "background.mp4",
@@ -209,7 +209,7 @@ class LongformVisualTests(unittest.TestCase):
             ],
         })
         with patch(
-            "create_longform.subprocess.run",
+            "pipelines.longform.subprocess.run",
             side_effect=[
                 None,
                 type("Result", (), {"stdout": probe})(),
@@ -223,7 +223,7 @@ class LongformVisualTests(unittest.TestCase):
         self.assertIn("loudnorm=I=-14:TP=-1.5:LRA=7,aresample=48000", render_command)
 
         with patch(
-            "create_longform.subprocess.run",
+            "pipelines.longform.subprocess.run",
             side_effect=[
                 None,
                 type("Result", (), {"stdout": probe})(),

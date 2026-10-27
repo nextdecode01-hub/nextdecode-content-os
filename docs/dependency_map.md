@@ -101,11 +101,11 @@ Notes:
 POST /run/generate
   -> run_scheduled_generation.sh (flock on .scheduled_generation.lock)
      -> run_pipeline.sh (PUBLISH_MODE=review)
-        -> create_short.py
+        -> pipelines/short.py
         -> review_bundle.py
         -> notify_review.py short   [review mode exits here]
      -> Wed/Sat only: run_longform_pipeline.sh
-        -> create_longform.py
+        -> pipelines/longform.py
         -> review_longform.py
         -> notify_review.py longform
 ```
@@ -130,9 +130,9 @@ as HTTP 200.
 
 ### 4.3 Manual/CLI flows
 
-- `run_pipeline.sh` with `PUBLISH_MODE=publish` -> `create_short.py` ->
+- `run_pipeline.sh` with `PUBLISH_MODE=publish` -> `pipelines/short.py` ->
   `review_bundle.py` -> `publish_all.py`.
-- `run_gen.sh` -> `strong_pipeline.py --topic ... --out metadata_strong.json`.
+- `run_gen.sh` -> `python -m app.script.pipeline --topic ... --out data/metadata_strong.json`.
 - `approve_review.py`, `approve_longform.py`, `setup_check.py`, `meta_preflight.py`,
   `model_health.py`, `monetization_tracker.py`, `workspace_sync.py` are manual tools.
 - OAuth one-offs: `server_3000.py`, `auth_server.py`, `exchange_token.py`,
@@ -173,12 +173,13 @@ logic; only import paths and project-root lookups changed.
 |---|---|---|---|---|
 | `app/script/studio.py` (was `script_studio.py`) | `multi_model_ai`, `app.script.voice_guide` | `strong_pipeline` | CLI + import | moved in Phase 5 |
 | `app/script/voice_guide.py` (was `voice_guide.py`) | — | `app.script.studio` | CLI + import | moved in Phase 5 |
-| `app/script/longform.py` (extracted from `create_longform.py`) | `multi_model_ai`, `app.research.topics` | `create_longform` | import | moved in Phase 5 |
-| `app/voice/provider.py` (was `voice_provider.py`) | — | `strong_pipeline` | CLI + import | moved in Phase 6 |
-| `strong_pipeline.py` | `app.research.desk`, `app.research.selector`, `app.research.topics`, `app.script.studio`, `app.voice.provider`, `motion_director`, `motion_render` | `create_short` | `run_gen.sh`; imported by `create_short` | `app/script/pipeline.py` |
+| `app/script/short.py` (extracted from `create_short.py`) | `multi_model_ai`, `app.research.topics` | `pipelines.short` | import | moved in Phase 5 |
+| `app/script/longform.py` (extracted from `create_longform.py`) | `multi_model_ai`, `app.research.topics` | `pipelines.longform` | import | moved in Phase 5 |
+| `app/voice/provider.py` (was `voice_provider.py`) | — | `app.script.pipeline` | CLI + import | moved in Phase 6 |
+| `app/script/pipeline.py` (was `strong_pipeline.py`) | `app.research.desk`, `app.research.selector`, `app.research.topics`, `app.script.studio`, `app.voice.provider`, `motion_director`, `motion_render` | `pipelines.short` | CLI + import | moved in Phase 5 |
 
 `app.script.voice_guide` is editorial prompt/copy guidance, not TTS. `app.voice.provider` is TTS.
-Phase 6 merges the package only; the two modules stay separate. `create_longform.py` keeps only visual/render
+Phase 6 merges the package only; the two modules stay separate. `pipelines/longform.py` keeps only visual/render
 helpers after Phase 5; script research and generation live in `app.script.longform`.
 
 ### 5.4 Visuals / render
@@ -222,8 +223,8 @@ helpers after Phase 5; script research and generation live in `app.script.longfo
 
 | Module | Imports | Imported by | Trigger | Target |
 |---|---|---|---|---|
-| `create_short.py` | `multi_model_ai`, `strong_pipeline`, `topic_research`, `video_archive`, `visual_assets` | — | `run_pipeline.sh` | `pipelines/short.py` |
-| `create_longform.py` | `multi_model_ai`, `topic_research`, `video_archive` | — | `run_longform_pipeline.sh` | `pipelines/longform.py` |
+| `pipelines/short.py` (was `create_short.py`) | `app.script.pipeline`, `app.script.short`, `video_archive`, `visual_assets` (dynamic) | — | `run_pipeline.sh` | moved in Phase 5 |
+| `pipelines/longform.py` (was `create_longform.py`) | `app.script.longform`, `video_archive` | — | `run_longform_pipeline.sh` | moved in Phase 5 |
 | `n8n_runner.py` | — | — | Docker CMD / Compose; n8n calls it | `api/main.py` (runner routes) |
 | `server_3000.py` | — | — | manual OAuth | archived in `archive/legacy-oauth/` |
 | `auth_server.py` | — | — | manual OAuth | archived in `archive/legacy-oauth/` |
@@ -243,19 +244,19 @@ helpers after Phase 5; script research and generation live in `app.script.longfo
 | Test | Local modules imported |
 |---|---|
 | `tests/test_approval_integrity.py` | `approval_integrity`, `publish_all`, `scheduled_publish` |
-| `tests/test_longform_editorial.py` | `app.script.longform`, `create_longform` |
-| `tests/test_longform_visuals.py` | `create_longform` |
+| `tests/test_longform_editorial.py` | `app.script.longform`, `pipelines.longform` |
+| `tests/test_longform_visuals.py` | `pipelines.longform` |
 | `tests/test_motion.py` | `motion_director`, `motion_render` |
-| `tests/test_multi_model_ai.py` | `app.script.longform`, `create_short`, `multi_model_ai` |
+| `tests/test_multi_model_ai.py` | `app.script.longform`, `app.script.short`, `multi_model_ai` |
 | `tests/test_n8n_runner.py` | `n8n_runner` |
 | `tests/test_n8n_workflow.py` | — (reads workflow JSON) |
 | `tests/test_phase0_repo_hygiene.py` | — |
 | `tests/test_research_desk.py` | `app.research.desk` |
 | `tests/test_script_studio.py` | `app.script.studio`, `app.script.voice_guide` |
 | `tests/test_setup_check.py` | — (copies `setup_check.py`) |
-| `tests/test_strong_pipeline.py` | `app.script.studio`, `model_health`, `motion_director`, `stock_fetcher`, `strong_pipeline` |
-| `tests/test_phase5_script_package.py` | `app.script.longform`, `app.script.studio`, `app.script.voice_guide`, `create_longform` |
-| `tests/test_phase6_voice_package.py` | `app.voice.provider`, `strong_pipeline` |
+| `tests/test_strong_pipeline.py` | `app.script.pipeline`, `app.script.studio`, `model_health`, `motion_director`, `stock_fetcher` |
+| `tests/test_phase5_script_package.py` | `app.script.*`, `pipelines.short`, `pipelines.longform` |
+| `tests/test_phase6_voice_package.py` | `app.voice.provider`, `app.script.pipeline` |
 | `tests/test_topic_research.py` | `app.research.topics` |
 | `tests/test_visual_quality.py` | `approval_integrity`, `approve_longform`, `approve_review`, `visual_quality` |
 
@@ -367,7 +368,7 @@ workflow calls them.
 | 2 | generated MP4/MP3/ASS/JSON/assets; `metadata*`, `review_*`, `output_*`, `shots/`, `media/`, `output/` | update path constants; keep `review_*`/upload ledgers readable by existing tools |
 | 3 | OAuth duplicate cluster, `publish_social`, `publish_review_safe`, `review_ledger`, `ollama_chat`, `server_5678` | confirm before archiving; no deletions |
 | 4 | `topic_research`, `trend_research`, `topic_selector`, `research_desk`, `analytics_collect` | preserve public functions used by `strong_pipeline` |
-| 5 | `create_short`, `create_longform`, `strong_pipeline`, `script_studio` | single entrypoints `pipelines/short.py`, `pipelines/longform.py`; preserve CLI args |
+| 5 | `create_short`, `create_longform`, `strong_pipeline`, `script_studio` | split into `app/script/{short,longform,pipeline,studio}.py` + `pipelines/{short,longform}.py`; CLI args preserved |
 | 6 | `voice_guide`, `voice_provider` | moved to `app/script/voice_guide.py` and `app/voice/provider.py`; guidance vs TTS stay separate |
 | 7 | `publish_all`, `youtube_upload`, `youtube_longform_upload`, `facebook_reels_upload`, `instagram_reels_upload` | split `app/publish/youtube.py`, `facebook.py`, `instagram.py`; keep subprocess/exit-code contract |
 | 8 | all JSON ledgers + `workspace_sync.workspace.db` | migration script; keep JSON files until verified |

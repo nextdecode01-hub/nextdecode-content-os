@@ -43,6 +43,15 @@ Moved in Phase 3 (2026-10-26). Standalone CLIs that no runtime path calls.
 | `ollama_chat.py` | CLI chat client; `multi_model_ai.py` already talks to Ollama over HTTP itself. |
 | `publish_review_safe.py` | Thin wrapper around `publish_all.py`; not called by n8n or the shell pipeline. |
 
+## superseded/
+
+Moved in Phase 5 (2026-10-27). Replaced by the target-tree entrypoints; the logic now
+lives in `app/script/` and `pipelines/`.
+
+| File | Why archived |
+|---|---|
+| `create_short.py` | Split into `app/script/short.py` (script generation) and `pipelines/short.py` (voice, visuals, render, QA, CLI). Restore only if the new entrypoint misbehaves. |
+
 ## Deliberately kept in the repo root
 
 These look optional but are still referenced, documented, or checked by

@@ -6,8 +6,10 @@ Research-led vertical videos for Nextdecode. The full pipeline researches curren
 
 - app/research/topics.py — topic discovery and repeat avoidance.
 - app/research/trends.py — multi-source trending-topic discovery and heat ranking.
-- create_short.py — script, voiceover, B-roll, subtitles, render, and quality checks.
-- strong_pipeline.py — the strong editorial chain that `create_short.py --quality strong` runs.
+- app/script/short.py — short-form script generation and script validation.
+- app/script/pipeline.py — the strong editorial chain that `pipelines/short.py --quality strong` runs.
+- pipelines/short.py — short-video entrypoint: script, voiceover, B-roll, subtitles, render, and quality checks.
+- pipelines/longform.py — long-form entrypoint: chapter visuals, narration, render, and QA.
 - app/research/selector.py — scores candidate topics on seven editorial dimensions and picks the best one.
 - app/research/desk.py — fetches and actually reads the sources, extracts verbatim claims, flags unsupported numbers and contradictions.
 - app/script/studio.py — generates hook candidates, scores them, writes a beat sheet, and runs a critic loop that rewrites until the script passes.
@@ -18,7 +20,7 @@ Research-led vertical videos for Nextdecode. The full pipeline researches curren
 - motion_render.py — renders the multi-shot video with Ken Burns motion, kinetic captions, music bed and SFX.
 - stock_fetcher.py — key-free real-photo sourcing from Wikimedia Commons with licence attribution.
 - model_health.py — probes every LLM provider, records the result, and prunes the fallback chain.
-- run_pipeline.sh — runs create_short.py and queues a review package; it publishes only when explicitly configured.
+- run_pipeline.sh — runs `pipelines/short.py` and queues a review package; it publishes only when explicitly configured.
 - run_scheduled_generation.sh — generates a Short daily and long-form video on Wednesday/Saturday, in review-only mode.
 - scheduled_publish.py — runs the 20:00 IST upload checks for today's exact owner-approved content.
 - approval_integrity.py — binds approvals to rendered-video and metadata hashes and the current IST day.
@@ -37,7 +39,7 @@ The live npm workflow is n8n workflow `aibl9NX61mKH9z5m`, named **NEXTDECODE - F
 
 ## The strong pipeline
 
-`create_short.py --quality strong` (the default) runs the full editorial chain instead of the legacy single-pass path:
+`pipelines/short.py --quality strong` (the default) runs the full editorial chain instead of the legacy single-pass path:
 
     topic_selector  ->  research_desk  ->  script_studio  ->  app.voice.provider
                    ->  motion_director  ->  motion_render  ->  QA
@@ -57,7 +59,7 @@ Visuals come from licensed stock when a Pexels or Pixabay key is present, otherw
 Run it directly:
 
     cd ~/shorts_studio
-    ./venv/bin/python strong_pipeline.py --topic "your topic" --out metadata_strong.json
+    ./venv/bin/python -m app.script.pipeline --topic "your topic" --out data/metadata_strong.json
 
 Check the LLM provider chain and prune it:
 

@@ -65,7 +65,7 @@ for module in ("visual_assets", "app.voice.provider", "app.research.trends", "pu
     add(f"Python module: {module}", module_available(module), f"Install {module} in the project virtual environment")
 
 # Strong pipeline modules
-for module in ("app.research.selector", "app.research.desk", "app.script.studio", "app.script.voice_guide", "motion_director", "motion_render", "stock_fetcher", "model_health", "strong_pipeline"):
+for module in ("app.research.selector", "app.research.desk", "app.script.short", "app.script.longform", "app.script.studio", "app.script.voice_guide", "app.script.pipeline", "motion_director", "motion_render", "stock_fetcher", "model_health"):
     add(f"Strong pipeline: {module}", module_available(module), f"Install {module} in the project virtual environment")
 
 add(

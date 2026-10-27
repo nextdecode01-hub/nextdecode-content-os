@@ -14,7 +14,7 @@ if ! command -v "$PYTHON" >/dev/null 2>&1; then
     exit 1
 fi
 
-if "$PYTHON" "$DIR/create_short.py" "$@"; then
+if "$PYTHON" "$DIR/pipelines/short.py" "$@"; then
     :
 else
     status=$?

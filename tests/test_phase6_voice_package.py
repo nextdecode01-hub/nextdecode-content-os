@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from app.voice import provider
-import strong_pipeline
+from app.script import pipeline as strong_pipeline
 
 ROOT = Path(__file__).resolve().parents[1]
 

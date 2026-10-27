@@ -14,7 +14,7 @@ if ! command -v "$PYTHON" >/dev/null 2>&1; then
     echo "Python environment not found: $PYTHON" >&2
     exit 1
 fi
-"$PYTHON" "$ROOT/create_longform.py"
+"$PYTHON" "$ROOT/pipelines/longform.py"
 "$PYTHON" "$ROOT/review_longform.py"
 "$PYTHON" "$ROOT/notify_review.py" longform
 echo "Long-form video is queued for human review; no upload was started."

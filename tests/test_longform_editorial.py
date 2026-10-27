@@ -3,7 +3,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from app.script import longform as longform_script
-import create_longform
+from pipelines import longform as create_longform
 
 
 class Response:

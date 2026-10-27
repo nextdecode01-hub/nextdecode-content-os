@@ -17,10 +17,14 @@ from pathlib import Path
 
 import requests
 from dotenv import load_dotenv
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 from app.script.longform import _visual_query, generate_script
 from video_archive import archive_video
 
-ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT / ".env", override=True)
 
 PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "").strip()
