@@ -8,9 +8,10 @@ import math
 import re
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from html.parser import HTMLParser
-from urllib.parse import quote_plus, urlparse
+from urllib.parse import urlparse
 
 import requests
 
@@ -110,7 +111,13 @@ def fetch_url(url: str, *, timeout: int = DEFAULT_TIMEOUT, max_chars: int = DEFA
             allow_redirects=True,
         )
         result["status_code"] = resp.status_code
-        content_type = resp.headers.get("Content-Type", "")
+        content_type = (resp.headers.get("Content-Type", "") or "").lower()
+        if resp.status_code >= 400:
+            result["error"] = f"HTTP {resp.status_code}"
+            return result
+        if content_type and not any(kind in content_type for kind in ("text/html", "application/xhtml", "text/plain", "application/xml", "text/xml")):
+            result["error"] = f"unsupported content-type: {content_type.split(';')[0]}"
+            return result
         html = resp.text or ""
         parsed = urlparse(url)
         publisher = parsed.netloc
@@ -406,9 +413,21 @@ def extract_limitations(text: str) -> list[str]:
     return limitations
 
 
-def _build_arxiv_search_url(topic: str) -> str:
-    q = quote_plus(f"all:{topic}")
-    return f"https://export.arxiv.org/api/query?search_query={q}&sortBy=relevance&sortOrder=descending&max_results=5"
+def _dedupe_source_urls(urls: list[str]) -> list[str]:
+    """Collapse mirrors of the same document (e.g. arxiv html/abs/pdf)."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for url in urls:
+        url = str(url or "").strip()
+        if not url:
+            continue
+        match = re.search(r"arxiv\.org/(?:abs|html|pdf)/([^/?#]+)", url, re.I)
+        key = f"arxiv:{re.sub(r'v\d+$', '', match.group(1))}" if match else url.split("#")[0].rstrip("/").lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(url)
+    return out
 
 
 def research_topic(topic: str, *, source_urls: list[str] | None = None, max_sources: int = MAX_SOURCES_DEFAULT) -> dict:
@@ -430,29 +449,31 @@ def research_topic(topic: str, *, source_urls: list[str] | None = None, max_sour
         if source_urls:
             urls_to_fetch.extend([u for u in source_urls if u])
         else:
-            # derive from discover_topics and build arxiv search URL
+            # Search for this exact topic. Deriving URLs from feed discovery
+            # pulled unrelated front-page stories into the script.
             try:
-                candidates = topic_research.discover_topics(limit=10)
-                for c in candidates:
-                    u = c.get("url") or c.get("source_url")
+                for hit in topic_research.search_web(topic, limit=max_sources * 2):
+                    u = hit.get("url")
                     if u and u not in urls_to_fetch:
                         urls_to_fetch.append(u)
             except Exception as e:
-                result["errors"].append(f"discover_topics error: {e}")
-            arxiv_url = _build_arxiv_search_url(topic)
-            if arxiv_url not in urls_to_fetch:
-                urls_to_fetch.append(arxiv_url)
+                result["errors"].append(f"search_web error: {e}")
+        urls_to_fetch = _dedupe_source_urls(urls_to_fetch)
+        if not urls_to_fetch:
+            result["errors"].append("no candidate source URLs for topic")
+            return result
         fetched_pages = []
-        for url in urls_to_fetch[:max_sources * 2]:  # allow some slack
+        candidates = list(dict.fromkeys(urls_to_fetch))[:max_sources * 2]
+        with ThreadPoolExecutor(max_workers=min(6, max(1, len(candidates)))) as pool:
+            pages = list(pool.map(fetch_url, candidates))
+        for page in pages:
             if len(fetched_pages) >= max_sources:
                 break
-            page = fetch_url(url)
             if page.get("ok") and page.get("text"):
                 fetched_pages.append(page)
                 result["sources"].append(page)
-            else:
-                if page.get("error"):
-                    result["errors"].append(f"{url}: {page['error']}")
+            elif page.get("error"):
+                result["errors"].append(f"{page.get('url', '')}: {page['error']}")
         if not fetched_pages:
             result["verdict"] = "insufficient"
             return result

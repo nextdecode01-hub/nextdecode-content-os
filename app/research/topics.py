@@ -8,8 +8,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from email.utils import parsedate_to_datetime
+from html import unescape
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import parse_qs, urlencode, urlparse
 
 import requests
 
@@ -26,6 +27,13 @@ ATOM = "{http://www.w3.org/2005/Atom}"
 
 def _get(url: str, **kwargs):
     return requests.get(url, headers=HEADERS, timeout=12, **kwargs)
+
+
+def _parse_xml(payload: str):
+    """Parse an RSS/Atom feed, refusing DTDs so entity expansion cannot run."""
+    if "<!DOCTYPE" in payload.upper() or "<!ENTITY" in payload.upper():
+        raise ValueError("refusing XML with DTD or entity declarations")
+    return ET.fromstring(payload)
 
 
 def _item(title: str, summary: str, source: str, url: str, published: str = "", score: float = 0):
@@ -92,7 +100,7 @@ def _fetch_hacker_news():
 def _fetch_arxiv():
     query = "cat:cs.AI OR cat:cs.CL OR cat:cs.CV OR cat:cs.LG"
     url = "https://export.arxiv.org/api/query?" + urlencode({"search_query": query, "sortBy": "submittedDate", "sortOrder": "descending", "max_results": 12})
-    root = ET.fromstring(_get(url).text)
+    root = _parse_xml(_get(url).text)
     out = []
     for entry in root.findall(f"{ATOM}entry"):
         title = entry.findtext(f"{ATOM}title", default="").strip()
@@ -107,7 +115,7 @@ def _fetch_arxiv():
 
 def _fetch_reddit(subreddit: str):
     url = f"https://www.reddit.com/r/{subreddit}/.rss?limit=15"
-    root = ET.fromstring(_get(url).text)
+    root = _parse_xml(_get(url).text)
     out = []
     for entry in root.findall(f"{ATOM}entry"):
         title = entry.findtext(f"{ATOM}title", default="").strip()
@@ -123,7 +131,7 @@ def _fetch_reddit(subreddit: str):
 def _fetch_trends():
     # Google exposes a Trends API in limited preview; the public RSS feed is an optional fallback.
     url = "https://trends.google.com/trending/rss?geo=IN"
-    root = ET.fromstring(_get(url).text)
+    root = _parse_xml(_get(url).text)
     out = []
     for entry in root.findall(".//item"):
         title = entry.findtext("title", default="").strip()
@@ -143,7 +151,7 @@ def search_related_news(query: str, limit: int = 8) -> list[dict]:
         "gl": "IN",
         "ceid": "IN:en",
     })
-    root = ET.fromstring(_get(url).text)
+    root = _parse_xml(_get(url).text)
     out = []
     for entry in root.findall(".//item"):
         title = entry.findtext("title", default="").strip()
@@ -156,6 +164,93 @@ def search_related_news(query: str, limit: int = 8) -> list[dict]:
             found["publisher"] = publisher
             out.append(found)
     return sorted(out, key=lambda item: (item["rank"], item["published"]), reverse=True)[:limit]
+
+
+def _strip_markup(value: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", str(value or ""))).strip()
+
+
+def _unwrap_search_url(url: str) -> str:
+    """Resolve redirect wrappers to the publisher URL; drop links we cannot read."""
+    try:
+        parsed = urlparse(str(url or "").strip())
+    except ValueError:
+        return ""
+    if parsed.netloc.endswith("duckduckgo.com") and parsed.path.startswith("/l/"):
+        target = (parse_qs(parsed.query).get("uddg") or [""])[0]
+        return _unwrap_search_url(target) if target else ""
+    if parsed.netloc.endswith("bing.com") and "apiclick" in parsed.path:
+        target = (parse_qs(parsed.query).get("url") or [""])[0]
+        return _unwrap_search_url(target) if target else ""
+    if parsed.netloc == "news.google.com":
+        return ""
+    return parsed.geturl() if parsed.scheme in {"http", "https"} else ""
+
+
+def _duckduckgo_results(query: str, limit: int) -> list[dict]:
+    url = "https://html.duckduckgo.com/html/?" + urlencode({"q": query[:160]})
+    html = _get(url).text
+    out = []
+    for block in re.findall(r'<a[^>]+class="result__a"[^>]*>.*?</a>', html, re.S):
+        href = re.search(r'href="([^"]+)"', block)
+        title_match = re.search(r">(.*?)</a>", block, re.S)
+        link = _unwrap_search_url(unescape(href.group(1))) if href else ""
+        title = _strip_markup(unescape(title_match.group(1))) if title_match else ""
+        if link and title:
+            out.append({"title": title, "url": link, "summary": "", "source": "Web search"})
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _bing_news_results(query: str, limit: int) -> list[dict]:
+    url = "https://www.bing.com/news/search?" + urlencode({"q": query[:120], "format": "RSS"})
+    root = _parse_xml(_get(url).text)
+    out = []
+    for entry in root.findall(".//item"):
+        title = _strip_markup(entry.findtext("title", default=""))
+        link = _unwrap_search_url(entry.findtext("link", default=""))
+        if not title or not link:
+            continue
+        out.append({
+            "title": title,
+            "url": link,
+            "summary": _strip_markup(entry.findtext("description", default=""))[:700],
+            "source": "Web search",
+        })
+        if len(out) >= limit:
+            break
+    return out
+
+
+def search_web(query: str, limit: int = 8) -> list[dict]:
+    """Keyless web search returning directly fetchable publisher URLs.
+
+    Used for explicit topics, where taste-based feed discovery returns unrelated
+    stories. DuckDuckGo HTML is primary; Bing News RSS is the fallback.
+    """
+    query = re.sub(r"\s+", " ", str(query or "")).strip()
+    if len(query) < 3:
+        return []
+    collected: list[dict] = []
+    for source in (_duckduckgo_results, _bing_news_results):
+        try:
+            collected.extend(source(query, limit))
+        except Exception:
+            continue
+        if len(collected) >= limit:
+            break
+    seen: set[str] = set()
+    out = []
+    for entry in collected:
+        key = re.sub(r"^https?://(www\.)?", "", entry["url"].split("#")[0].rstrip("/")).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(entry)
+        if len(out) >= limit:
+            break
+    return out
 
 
 def _recent_titles(path: Path):

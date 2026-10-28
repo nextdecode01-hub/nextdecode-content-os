@@ -1,4 +1,4 @@
-import os, json, base64, hashlib, hmac, subprocess, time, urllib.request
+import os, json, re, base64, hashlib, hmac, subprocess, time, urllib.request
 from pathlib import Path
 from dotenv import load_dotenv
 import requests
@@ -16,11 +16,31 @@ IMAGE_PROVIDER = os.getenv("IMAGE_PROVIDER", "").strip().lower()
 IMAGE_MODEL = os.getenv("IMAGE_MODEL", "").strip()
 THUMBNAIL_PROVIDER = os.getenv("THUMBNAIL_PROVIDER", "").strip().lower()
 VISUAL_PROVIDER = os.getenv("VISUAL_PROVIDER", "").strip().lower()
+_SECRET_VALUES = tuple(value for value in (POLLINATIONS_KEY, GEMINI_KEY, FAL_KEY, REPLICATE_TOKEN, OPENAI_KEY) if value)
+
+
+def _redact(value) -> str:
+    """Strip credentials from anything headed for a log line or API response."""
+    text = str(value)
+    for secret in _SECRET_VALUES:
+        text = text.replace(secret, "***")
+    return re.sub(r"(?i)\b(key|token|api_key|access_token)=([^&\s'\"]+)", r"\1=***", text)
+
+
+def _looks_like_image(data: bytes) -> bool:
+    if not data or len(data) < 1024:
+        return False
+    return (
+        data.startswith(b"\x89PNG\r\n\x1a\n")
+        or data.startswith(b"\xff\xd8\xff")
+        or data.startswith(b"GIF8")
+        or (data[:4] == b"RIFF" and data[8:12] == b"WEBP")
+    )
 
 
 def available_providers():
-    out = []
-    if POLLINATIONS_KEY: out.append("pollinations")
+    # Pollinations serves keyless requests too; a key only raises its limits.
+    out = ["pollinations"]
     if GEMINI_KEY: out.append("gemini")
     if os.getenv("CF_ACCOUNT_ID", "").strip() and os.getenv("CF_API_TOKEN", "").strip(): out.append("cloudflare")
     if FAL_KEY: out.append("fal")
@@ -31,21 +51,41 @@ def available_providers():
     return out
 
 
+_PROVIDER_COOLDOWN: dict[str, float] = {}
+
+
+def _cool_down(provider: str, error) -> None:
+    """Stop hammering a provider that is rate-limited, unpaid, or rejecting auth."""
+    err = str(error)
+    if re.search(r"\b(401|402|403|429)\b", err):
+        _PROVIDER_COOLDOWN[provider] = time.time() + 600
+    elif not re.search(r"\b(no key|missing)\b", err, re.I):
+        _PROVIDER_COOLDOWN[provider] = time.time() + 60
+
+
 def _chain(provider=None):
     if provider: return [provider]
     if VISUAL_PROVIDER: return [VISUAL_PROVIDER]
     head = IMAGE_PROVIDER if IMAGE_PROVIDER else None
+    configured = set(available_providers())
+    now = time.time()
     chain = []
     if head and head in PROVIDERS: chain.append(head)
     for p in PROVIDERS:
-        if p not in chain: chain.append(p)
+        if p not in chain and p in configured and _PROVIDER_COOLDOWN.get(p, 0) <= now:
+            chain.append(p)
+    if "local" not in chain:
+        chain.append("local")
     return chain
 
 
 def _download(url, out_path):
     r = requests.get(url, timeout=120); r.raise_for_status()
+    content = r.content or b""
+    if not _looks_like_image(content):
+        raise ValueError(f"downloaded payload is not an image ({r.headers.get('Content-Type', 'unknown')}, {len(content)} bytes)")
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-    Path(out_path).write_bytes(r.content)
+    Path(out_path).write_bytes(content)
     return str(out_path)
 
 
@@ -56,16 +96,32 @@ def _pollinations(prompt, out_path):
     url = f"https://image.pollinations.ai/prompt/{urllib.parse.quote(enhanced_prompt)}?width=720&height=1280&nologo=true&model=flux"
     if POLLINATIONS_KEY:
         url += f"&key={POLLINATIONS_KEY}"
-    try:
-        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=40)
-        r.raise_for_status()
-        if len(r.content) < 5000:
-            return None, "empty image"
-        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-        Path(out_path).write_bytes(r.content)
-        return str(out_path), None
-    except Exception as e:
-        return None, str(e)
+    last = None
+    for attempt in range(3):
+        try:
+            r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=60)
+            if r.status_code == 429:
+                last = "429 rate limited"
+                time.sleep(8 * (attempt + 1))
+                continue
+            if r.status_code in (400, 401, 402, 403, 404):
+                return None, _redact(f"HTTP {r.status_code} (provider rejected the request; not retrying)")
+            if r.status_code >= 500:
+                last = f"HTTP {r.status_code}"
+                time.sleep(5 * (attempt + 1))
+                continue
+            r.raise_for_status()
+            if not _looks_like_image(r.content or b""):
+                last = f"invalid image response ({r.headers.get('Content-Type', 'unknown')}, {len(r.content or b'')} bytes)"
+                time.sleep(4)
+                continue
+            Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+            Path(out_path).write_bytes(r.content)
+            return str(out_path), None
+        except Exception as e:
+            last = _redact(e)
+            time.sleep(5)
+    return None, _redact(last or "pollinations failed")
 
 
 def _gemini(prompt, out_path):
@@ -151,27 +207,63 @@ def _cloudflare(prompt, out_path):
     return str(out_path), None
 
 
+_WIKIMEDIA_NOISE = re.compile(
+    r"(?i)\b(8k|4k|resolution|cinematic|lighting|photorealistic|vertical|composition|"
+    r"9:16|dark|moody|visual|aesthetic|close[- ]?up|wide|shot|scene|stock|footage|video)\b"
+)
+
+
+def _wikimedia_queries(prompt: str) -> list[str]:
+    """Turn a long style-laden shot prompt into short Commons search phrases."""
+    text = re.sub(r"\bNO\b[^,:;]*[,;]?", " ", str(prompt or ""), flags=re.I)
+
+    def words_of(segment: str) -> list[str]:
+        segment = _WIKIMEDIA_NOISE.sub(" ", segment)
+        return [word for word in re.findall(r"[A-Za-z0-9]+", segment) if len(word) > 2]
+
+    # The subject usually follows the style prefix ("...visual: boardroom at night").
+    subject = words_of(text.split(":", 1)[1]) if ":" in text else []
+    fallback = words_of(text)
+    queries = []
+    if len(subject) >= 2:
+        queries.extend([" ".join(subject[:4]), " ".join(subject[:3]), " ".join(subject[:2])])
+    if len(fallback) >= 2:
+        queries.extend([" ".join(fallback[:4]), " ".join(fallback[:3]), " ".join(fallback[:2])])
+    return list(dict.fromkeys(query for query in queries if len(query) >= 3))
+
+
 def _wikimedia(prompt, out_path):
-    import re
     import stock_fetcher
-    words = re.findall(r"[A-Za-z0-9]+", str(prompt))[:6]
-    query = " ".join(words).strip()
-    if len(query) < 3: return None, "no usable query"
-    try:
-        hits = stock_fetcher.search_images(query, limit=5)
-    except Exception as e:
-        return None, "wikimedia search failed: %s" % e
-    if not hits: return None, "no wikimedia results"
+    queries = _wikimedia_queries(prompt)
+    if not queries:
+        return None, "no usable query"
+    hits = []
+    for query in queries:
+        try:
+            hits = stock_fetcher.search_images(query, limit=5)
+        except Exception as e:
+            return None, "wikimedia search failed: %s" % _redact(e)
+        if hits:
+            break
+    if not hits:
+        return None, "no wikimedia results"
     hit = hits[0]
-    ok = stock_fetcher.download_image(hit.get("thumb_url") or hit.get("url") or "", Path(out_path))
+    original = str(hit.get("url") or "")
+    url = original if re.search(r"\.(jpe?g|png|webp)(\?|$)", original, re.I) else (hit.get("thumb_url") or original)
+    try:
+        ok = stock_fetcher.download_image(url, Path(out_path))
+        if ok and not _looks_like_image(Path(out_path).read_bytes()):
+            return None, "wikimedia returned a non-image payload"
+    except Exception as e:
+        return None, "wikimedia download failed: %s" % _redact(e)
     if not ok: return None, "wikimedia download failed"
     return str(out_path), None
 
 
 def _local(prompt, out_path):
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-    text = prompt.replace(":","\\:").replace("'","\\'").replace(",","\\,").replace("%","\\%")
-    cmd = ["ffmpeg","-y","-f","lavfi","-i","color=c=0x0B1220:s=1080x1920:d=1","-vf","drawtext=text='%s':fontcolor=white:fontsize=48:x=(w-text_w)/2:y=(h-text_h)/2" % text,"-frames:v","1",out_path]
+    # prompt text intentionally not drawn on the frame
+    cmd = ["ffmpeg","-y","-f","lavfi","-i","color=c=0x0B1220:s=1080x1920:d=1","-frames:v","1",out_path]
     subprocess.run(cmd, check=True, capture_output=True)
     return str(out_path), None
 
@@ -194,9 +286,13 @@ def generate_image(prompt, out_dir, *, provider=None, aspect="9:16", size=None):
             elif p == "local": path, err = _local(prompt, out_path)
             else: path, err = None, "unknown provider"
             if path: return {"path":path,"provider":p,"url":None,"error":None}
-            last_err = err
+            last_err = _redact(err)
+            _cool_down(p, last_err)
+            print(f"[visual] provider '{p}' skipped: {last_err}")
         except Exception as e:
-            last_err = str(e)
+            last_err = _redact(e)
+            _cool_down(p, last_err)
+            print(f"[visual] provider '{p}' failed: {last_err}")
     return {"path":None,"provider":(provider or "none"),"url":None,"error":last_err or "all failed"}
 
 
