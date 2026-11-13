@@ -1,0 +1,45 @@
+Area	Readiness	Assessment
+Product vision	Ready	Clear
+Product scope	Ready	Initial Creator Mode defined
+Overall architecture	Ready	Architecture Part 1
+Shorts Studio pipeline	Ready	Pipeline Part 2
+Existing system understanding	Partial	Based on reconciliation reports, needs targeted verification
+Shared data model	Pending	Part 3 needed
+Workflow orchestration	Pending	Queue, workers and recovery contracts needed
+Agent architecture	Partial	Ownership known; technical contracts missing
+QA and rights enforcement	Partial	Major blockers identified, solutions not implemented
+Publishing automation	Partial	Conditional automation preference established, detailed policy pending
+Deployment architecture	Pending	Local-first vs always-on hybrid execution needs final design
+Monitoring and recovery	Pending	Operational requirements need specification
+
+
+
+
+3. What we still need to finalize
+I recommend completing these six technical design packages before implementation:
+Package	Main decisions
+Part 3 — Data Architecture	Entities, relationships, IDs, schemas, versioning
+Part 4 — Automation Engine	Queue, workers, scheduler, retries, recovery
+Part 5 — Agent Architecture	Agent contracts, permissions, orchestration
+Part 6 — Governance Engine	QA, rights, approval and conditional publishing
+Part 7 — Integration Architecture	Shorts Studio adapters, APIs, artifact contracts
+Part 8 — Deployment & Operations	Local/hybrid architecture, security, monitoring, backups
+
+
+
+
+4. Decisions I recommend carrying forward
+These are the design defaults I would use unless you disagree.
+Area	Recommended direction
+Product	Single-owner Creator Mode initially
+Architecture	Centralized intelligence + specialized studios
+Execution	Persistent control plane, separate workers
+Database	Design independently; compare SQLite prototype; retain PostgreSQL migration path
+Agents	Small specialized agents, deterministic enforcement
+Publishing	Conditional automation with hard safety gates
+Pending approval	Hold until reviewed
+Initial eligible formats	Shorts and short-form social
+Publishing limits	Configurable, platform-specific
+Infrastructure	Free-first, local-first, hybrid-ready
+Human control	Explicit owner approval for critical policy changes
+Existing engine	Preserve and integrate Shorts Studio

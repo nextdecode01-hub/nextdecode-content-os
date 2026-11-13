@@ -2,7 +2,6 @@
 .env
 .env.*
 !.env.example
-/.n8n-docker.env
 /token.json
 /youtube_token.json
 /youtube_token*.json
@@ -90,4 +89,3 @@ wsl.localhost/
 /analytics_latest.json
 /workspace.db
 /media/
-.andromity/

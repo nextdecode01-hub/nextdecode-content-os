@@ -3,7 +3,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 import requests
 
-load_dotenv(Path(__file__).with_name(".env"))
+load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 PROVIDERS = ["pollinations", "gemini", "cloudflare", "fal", "replicate", "openai", "wikimedia", "local"]
 
@@ -233,7 +233,7 @@ def _wikimedia_queries(prompt: str) -> list[str]:
 
 
 def _wikimedia(prompt, out_path):
-    import stock_fetcher
+    from app.visuals import stock_fetcher
     queries = _wikimedia_queries(prompt)
     if not queries:
         return None, "no usable query"
@@ -314,7 +314,7 @@ def generate_thumbnail(prompt, title, out_path, *, provider=None):
 
 def thumbnail_text_suggestions(script_json):
     try:
-        from multi_model_ai import generate_json
+        from app.providers.multi_model_ai import generate_json
         prompt = "Propose 3 punchy thumbnail text options (max 5 words each) JSON list for: " + json.dumps(script_json)
         res = generate_json(prompt, 0.7, 60)
         if isinstance(res, list): return [str(x) for x in res][:3]

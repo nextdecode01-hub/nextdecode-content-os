@@ -1,0 +1,164 @@
+[
+  {
+    "docx": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\01_MASTER_PLANS_AND_WORK_ORDERS\\NEXTDECODE_Content_OS_Remaining_Phases_Master_Plan_v1.0_2026-11-01.docx",
+    "md": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\01_MASTER_PLANS_AND_WORK_ORDERS\\NEXTDECODE_Content_OS_Remaining_Phases_Master_Plan_v1.0_2026-11-01.md",
+    "metadata_parts": 2,
+    "status": "UPDATED"
+  },
+  {
+    "docx": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch02_Consolidated.docx",
+    "md": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch02_Consolidated.md",
+    "metadata_parts": 1,
+    "status": "UPDATED"
+  },
+  {
+    "docx": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch03_Final_Contract_Consolidation_Owner_Review.docx",
+    "md": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch03_Final_Contract_Consolidation_Owner_Review.md",
+    "metadata_parts": 1,
+    "status": "UPDATED"
+  },
+  {
+    "docx": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch04_Source_Verification_and_Contract_Freeze_Preparation.docx",
+    "md": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch04_Source_Verification_and_Contract_Freeze_Preparation.md",
+    "metadata_parts": 1,
+    "status": "UPDATED"
+  },
+  {
+    "docx": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch05_WP1_Domain_and_Persistence_Design_Candidate.docx",
+    "md": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch05_WP1_Domain_and_Persistence_Design_Candidate.md",
+    "metadata_parts": 1,
+    "status": "UPDATED"
+  },
+  {
+    "docx": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch06_WP2_Durable_Workflow_and_Job_Execution_Design.docx",
+    "md": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch06_WP2_Durable_Workflow_and_Job_Execution_Design.md",
+    "metadata_parts": 1,
+    "status": "UPDATED"
+  },
+  {
+    "docx": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch07_WP3_Worker_Registry_Identity_Trust_Capabilities.docx",
+    "md": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch07_WP3_Worker_Registry_Identity_Trust_Capabilities.md",
+    "metadata_parts": 1,
+    "status": "UPDATED"
+  },
+  {
+    "docx": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch08_WP4_Artifact_Registry_Storage_Integrity_Transfer.docx",
+    "md": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch08_WP4_Artifact_Registry_Storage_Integrity_Transfer.md",
+    "metadata_parts": 1,
+    "status": "UPDATED"
+  },
+  {
+    "docx": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch09_WP5_Governance_Quality_Rights_Approval_Authorization.docx",
+    "md": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch09_WP5_Governance_Quality_Rights_Approval_Authorization.md",
+    "metadata_parts": 1,
+    "status": "UPDATED"
+  },
+  {
+    "docx": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch10_WP6_Vertical_Slice_Integration_Recovery_Acceptance.docx",
+    "md": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch10_WP6_Vertical_Slice_Integration_Recovery_Acceptance.md",
+    "metadata_parts": 1,
+    "status": "UPDATED"
+  },
+  {
+    "docx": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch11_Master_Integration_Blueprint_Owner_Freeze_Review.docx",
+    "md": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch11_Master_Integration_Blueprint_Owner_Freeze_Review.md",
+    "metadata_parts": 2,
+    "status": "UPDATED"
+  },
+  {
+    "docx": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch12_Authoritative_Source_Verification_Contract_Reconciliation.docx",
+    "md": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch12_Authoritative_Source_Verification_Contract_Reconciliation.md",
+    "metadata_parts": 2,
+    "status": "UPDATED"
+  },
+  {
+    "docx": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch13_Implementation_Readiness_Controlled_Execution_Package.docx",
+    "md": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch13_Implementation_Readiness_Controlled_Execution_Package.md",
+    "metadata_parts": 2,
+    "status": "UPDATED"
+  },
+  {
+    "docx": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch14_Acceptance_Evidence_Release_Readiness_Dossier.docx",
+    "md": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch14_Acceptance_Evidence_Release_Readiness_Dossier.md",
+    "metadata_parts": 2,
+    "status": "UPDATED"
+  },
+  {
+    "docx": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch15_Source_Reconciliation_Contract_Closure_Dossier.docx",
+    "md": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch15_Source_Reconciliation_Contract_Closure_Dossier.md",
+    "metadata_parts": 2,
+    "status": "UPDATED"
+  },
+  {
+    "docx": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch17_State_Machine_Transition_Catalogue.docx",
+    "md": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch17_State_Machine_Transition_Catalogue.md",
+    "metadata_parts": 2,
+    "status": "UPDATED"
+  },
+  {
+    "docx": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch18_API_Event_Schema_Specification_Pack.docx",
+    "md": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch18_API_Event_Schema_Specification_Pack.md",
+    "metadata_parts": 2,
+    "status": "UPDATED"
+  },
+  {
+    "docx": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch19_Database_Schema_ERD_Persistence_Specification.docx",
+    "md": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch19_Database_Schema_ERD_Persistence_Specification.md",
+    "metadata_parts": 2,
+    "status": "UPDATED"
+  },
+  {
+    "docx": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch20_Security_Identity_Access_Control_Threat_Model.docx",
+    "md": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch20_Security_Identity_Access_Control_Threat_Model.md",
+    "metadata_parts": 2,
+    "status": "UPDATED"
+  },
+  {
+    "docx": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch21_Observability_Logging_Metrics_Tracing_Operational_Runbook.docx",
+    "md": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch21_Observability_Logging_Metrics_Tracing_Operational_Runbook.md",
+    "metadata_parts": 2,
+    "status": "UPDATED"
+  },
+  {
+    "docx": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch22_Configuration_Environment_Deployment_Release_Management.docx",
+    "md": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch22_Configuration_Environment_Deployment_Release_Management.md",
+    "metadata_parts": 2,
+    "status": "UPDATED"
+  },
+  {
+    "docx": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch23_Backup_Disaster_Recovery_Business_Continuity_Data_Recovery.docx",
+    "md": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch23_Backup_Disaster_Recovery_Business_Continuity_Data_Recovery.md",
+    "metadata_parts": 2,
+    "status": "UPDATED"
+  },
+  {
+    "docx": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch24_Performance_Scalability_Capacity_Cost_Control.docx",
+    "md": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch24_Performance_Scalability_Capacity_Cost_Control.md",
+    "metadata_parts": 2,
+    "status": "UPDATED"
+  },
+  {
+    "docx": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch25_Security_Architecture_Threat_Model_Defensive_Controls.docx",
+    "md": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch25_Security_Architecture_Threat_Model_Defensive_Controls.md",
+    "metadata_parts": 2,
+    "status": "UPDATED"
+  },
+  {
+    "docx": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch26_Privacy_Data_Governance_Retention_Consent_Compliance.docx",
+    "md": "05_IMPLEMENTATION_PLANS_AND_WORK_ORDERS\\02_BATCH_PACKAGES\\NEXTDECODE_P0_Batch26_Privacy_Data_Governance_Retention_Consent_Compliance.md",
+    "metadata_parts": 2,
+    "status": "UPDATED"
+  },
+  {
+    "docx": "09_ARCHIVE_AND_SUPERSEDED\\SOURCE_ORIGINAL__07_Where_NEXTDECODE_Stands_Today_HISTORICAL.docx",
+    "md": "00_CONTROL_AND_INDEX\\07_Where_NEXTDECODE_Stands_Today_HISTORICAL.md",
+    "metadata_parts": 0,
+    "status": "NO_HEADER_FOOTER_TEXT"
+  },
+  {
+    "docx": "09_ARCHIVE_AND_SUPERSEDED\\SOURCE_ORIGINAL__NEXTDECODE_Master_Blueprint_2.0.docx",
+    "md": "01_PRODUCT_AND_ARCHITECTURE\\01_PRODUCT_VISION_AND_BLUEPRINT\\NEXTDECODE_Master_Blueprint_2.0.md",
+    "metadata_parts": 2,
+    "status": "UPDATED"
+  }
+]

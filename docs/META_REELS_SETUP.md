@@ -37,8 +37,6 @@ chmod +x ~/.local/bin/cloudflared
 
 The hostname is different on every run and the tunnel disappears when the run ends, so a stable host remains the recommended setup. Remove the flag to require `INSTAGRAM_VIDEO_URL` again.
 
-## n8n
+## Scheduling and authorization boundary
 
-The live n8n workflow calls `publish_all.py` after generation. It preflights YouTube, Facebook, and Instagram settings and stops before any upload if one destination is incomplete, so scheduled runs cannot quietly publish only to YouTube. Configure and verify all three publishers and a stable Instagram media host before activating the schedule.
-
-
+Scheduled publishing is owned by the application publishing scheduler and the shared authorization boundary. The Autonomous Task Execution Core does not expose a public upload capability. A generated artifact remains review-only until the owner separately approves the exact artifact and metadata. Never enable a scheduler as a substitute for that approval.

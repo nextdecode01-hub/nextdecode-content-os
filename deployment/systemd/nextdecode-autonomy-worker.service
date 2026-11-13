@@ -1,0 +1,24 @@
+[Unit]
+Description=NEXTDECODE Autonomous Task Worker
+Requires=nextdecode-postgres.service
+After=nextdecode-postgres.service
+StartLimitIntervalSec=5min
+StartLimitBurst=6
+
+[Service]
+Type=simple
+WorkingDirectory=/home/demon/shorts_studio
+Environment=TZ=Asia/Kolkata
+EnvironmentFile=/home/demon/.config/nextdecode/autonomy-db.env
+ExecStartPre=/home/demon/shorts_studio/venv/bin/python -m app.autonomy.wait_for_postgres
+ExecStart=/home/demon/shorts_studio/venv/bin/python -m app.autonomy.cli worker
+Restart=on-failure
+RestartSec=15s
+TimeoutStartSec=45
+TimeoutStopSec=30
+KillSignal=SIGINT
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

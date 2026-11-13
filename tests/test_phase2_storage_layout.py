@@ -6,12 +6,12 @@ import re
 import subprocess
 from pathlib import Path
 
-import approve_longform
-import approve_review
-import model_health
-import multi_model_ai
-import review_bundle
-import workspace_sync
+from app.review import approve_longform as approve_longform
+from app.review import approve_review as approve_review
+from app.providers import model_health as model_health
+from app.providers import multi_model_ai as multi_model_ai
+from app.review import review_bundle as review_bundle
+from app.operations import workspace_sync as workspace_sync
 from app.research import selector as topic_selector
 from app.research import trends as trend_research
 
@@ -117,10 +117,10 @@ def test_approval_modules_use_data_and_outputs() -> None:
     assert 'ROOT / "data" / "longform_review_pending.json"' in approve_longform_source
     assert 'ROOT / "outputs" / "output_longform.mp4"' in approve_longform_source
     assert 'TOKEN_FILE = SCRIPT_DIR / "youtube_token.json"' in (
-        ROOT / "youtube_upload.py"
+        ROOT / "app" / "publish" / "youtube_upload.py"
     ).read_text(encoding="utf-8")
     assert 'SCRIPT_DIR / "data" / "metadata.json"' in (
-        ROOT / "youtube_upload.py"
+        ROOT / "app" / "publish" / "youtube_upload.py"
     ).read_text(encoding="utf-8")
 
 

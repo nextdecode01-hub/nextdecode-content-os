@@ -1,0 +1,20 @@
+[Unit]
+Description=NEXTDECODE local PostgreSQL control-plane database
+After=network.target
+StartLimitIntervalSec=5min
+StartLimitBurst=10
+
+[Service]
+Type=simple
+ExecStartPre=-/usr/bin/podman rm -f nextdecode-postgres
+ExecStart=/usr/bin/podman run --rm --name nextdecode-postgres -p 127.0.0.1:54329:5432 --env-file /home/demon/.config/nextdecode/postgres.env -v nextdecode-postgres-data:/var/lib/postgresql:Z docker.io/library/postgres:18-alpine
+ExecStop=/usr/bin/podman stop -t 10 nextdecode-postgres
+ExecStopPost=-/usr/bin/podman rm -f nextdecode-postgres
+Restart=on-failure
+RestartSec=30s
+TimeoutStopSec=25
+KillSignal=SIGTERM
+UMask=0077
+
+[Install]
+WantedBy=default.target

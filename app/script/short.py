@@ -10,7 +10,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-import multi_model_ai
+from app.providers import multi_model_ai
 from app.research.topics import discover_topics
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -20,10 +20,10 @@ SCRIPT_PROFILES = {
     "micro_20s": {"seconds": 20, "min_words": 42, "max_words": 58},
     "standard_30s": {"seconds": 30, "min_words": 62, "max_words": 78},
     "standard_35s": {"seconds": 35, "min_words": 72, "max_words": 92},
-    "deep_45s": {"seconds": 45, "min_words": 96, "max_words": 118},
+    "deep_45s": {"seconds": 45, "min_words": 92, "max_words": 118},
     "deep_60s": {"seconds": 60, "min_words": 128, "max_words": 150},
 }
-SCRIPT_PROFILE = os.getenv("SCRIPT_PROFILE", "standard_35s").strip().lower()
+SCRIPT_PROFILE = (os.getenv("SCRIPT_PROFILE") or "deep_45s").strip().lower()
 if SCRIPT_PROFILE not in SCRIPT_PROFILES:
     raise RuntimeError("Unknown SCRIPT_PROFILE; choose one of: " + ", ".join(SCRIPT_PROFILES))
 PROFILE = SCRIPT_PROFILES[SCRIPT_PROFILE]
@@ -49,6 +49,23 @@ def validate_opening_quality(hook: str, voice_text: str, source_urls: list[str])
     if not source_urls:
         raise RuntimeError("No verified source is attached to the script; skipping this run.")
 
+def trim_voiceover_at_sentence_boundary(text: str, min_words: int, max_words: int) -> tuple[str, bool]:
+    """Trim excess model verbosity without cutting a sentence or changing its claims."""
+    normalized = re.sub(r"\s+", " ", str(text)).strip()
+    if len(normalized.split()) <= max_words:
+        return normalized, False
+    sentences = [item.strip() for item in re.split(r"(?<=[.!?])\s+", normalized) if item.strip()]
+    while len(sentences) > 1 and len(" ".join(sentences).split()) > max_words:
+        sentences.pop()
+    candidate = " ".join(sentences)
+    count = len(candidate.split())
+    if not min_words <= count <= max_words:
+        raise RuntimeError(
+            f"Generated voiceover cannot be safely trimmed to {min_words}-{max_words} words at sentence boundaries."
+        )
+    return candidate, True
+
+
 def get_recent_topics(max_count: int = 10) -> str:
     """Reads past topics from history to avoid repeating content."""
     history_file = PROJECT_ROOT / "data" / "used_topics.txt"
@@ -64,9 +81,15 @@ def record_topic(title: str):
     with open(history_file, "a", encoding="utf-8") as f:
         f.write(title + "\n")
 
-def generate_script(topic: str = None) -> dict:
-    """Create a research-led Nextdecode script. Fail closed instead of publishing a stale template."""
-    research = discover_topics(PROJECT_ROOT / "data" / "used_topics.txt", limit=6)
+def generate_script(topic: str = None, research_candidates: list[dict] | None = None) -> dict:
+    """Create a research-led script, optionally from a verified upstream research artifact."""
+    research = (
+        research_candidates
+        if research_candidates is not None
+        else discover_topics(PROJECT_ROOT / "data" / "used_topics.txt", limit=6)
+    )
+    if not isinstance(research, list):
+        raise RuntimeError("Research candidates must be a list.")
     if topic:
         selected_topic = topic.strip()
     elif research:
@@ -120,18 +143,40 @@ Return only valid JSON with exactly these fields:
 }}
 """
 
-    parsed = multi_model_ai.generate_json(prompt, temperature=0.65, timeout=120)
-
-    title = str(parsed.get("title", "")).strip()
+    parsed = multi_model_ai.generate_json(prompt, temperature=0.65, timeout=180)
     voice_text = re.sub(r"\s+", " ", str(parsed.get("voice_text", ""))).strip()
+    word_count = len(voice_text.split())
+    repair_attempts = 0
+    while word_count < PROFILE["min_words"] and repair_attempts < 1:
+        # Only under-length drafts need another inference call. Over-length drafts
+        # are safely shortened at sentence boundaries without spending more tokens.
+        repair_attempts += 1
+        repair_action = "Expand with one evidence-supported explanation or concrete example"
+        repair_prompt = (
+            prompt
+            + f"\n\nLENGTH REPAIR {repair_attempts}/1: the current voice_text has {word_count} words. "
+              f"{repair_action} to 100–112 spoken words (accepted range "
+              f"{PROFILE['min_words']}–{PROFILE['max_words']}). Do not add claims, numbers, facts, "
+              "quotes or sources beyond the supplied research candidates. Count voice_text words only. "
+              "Return the complete replacement JSON object.\nCURRENT VOICE_TEXT:\n"
+              f"{voice_text}"
+        )
+        parsed = multi_model_ai.generate_json(repair_prompt, temperature=0.15, timeout=180)
+        voice_text = re.sub(r"\s+", " ", str(parsed.get("voice_text", ""))).strip()
+        word_count = len(voice_text.split())
+
+    voice_text, length_trimmed = trim_voiceover_at_sentence_boundary(
+        voice_text, PROFILE["min_words"], PROFILE["max_words"]
+    )
+    word_count = len(voice_text.split())
+    title = str(parsed.get("title", "")).strip()
     broll_query = str(parsed.get("broll_query", "")).strip()
     tags = parsed.get("youtube_tags", parsed.get("tags", []))
     instagram_hashtags = parsed.get("instagram_hashtags", [])
-    word_count = len(voice_text.split())
     if not title or len(title) > 60:
         raise RuntimeError("Generated title is missing or exceeds 60 characters; skipping this run.")
     if not PROFILE["min_words"] <= word_count <= PROFILE["max_words"]:
-        raise RuntimeError(f"Generated voiceover has {word_count} words; expected {PROFILE['min_words']}-{PROFILE['max_words']} for {SCRIPT_PROFILE}. Skipping this run.")
+        raise RuntimeError(f"Generated voiceover has {word_count} words after {repair_attempts} bounded repairs; expected {PROFILE['min_words']}-{PROFILE['max_words']} for {SCRIPT_PROFILE}. Skipping this run.")
     # Models occasionally return a long, punctuated visual description even
     # though the prompt asks for a short search query. Normalize it so a
     # recoverable formatting issue does not discard an otherwise valid script.
@@ -194,6 +239,7 @@ Return only valid JSON with exactly these fields:
         "real_demo_required": True,
         "research": research[:5],
         "word_count": word_count,
+        "length_trimmed_at_sentence_boundary": length_trimmed,
         "script_profile": SCRIPT_PROFILE,
         "target_duration_seconds": PROFILE["seconds"],
         "word_range": [PROFILE["min_words"], PROFILE["max_words"]],

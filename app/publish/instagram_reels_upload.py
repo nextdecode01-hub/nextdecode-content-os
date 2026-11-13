@@ -27,7 +27,10 @@ from urllib.parse import quote
 import requests
 from dotenv import load_dotenv
 
-ROOT = Path(__file__).resolve().parent
+from app.publish.authorization import PublishNotAuthorized, authorize_publish, authorization_error, verify_protected_action_decision
+from app.publish.artifact_snapshot import ArtifactIntegrityError, upload_snapshot
+
+ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(ROOT / ".env", override=True)
 VIDEO = ROOT / "outputs" / "output_short.mp4"
 METADATA = ROOT / "data" / "metadata.json"
@@ -99,17 +102,32 @@ def wait_until_reachable(url: str, timeout: int = 90) -> bool:
     return False
 
 
-def public_video_url() -> tuple[str, callable]:
+def public_video_url(*, serve_path: Path) -> tuple[str, callable]:
+    """Expose one MP4 to Meta through a temporary local tunnel.
+
+    The caller must supply the process-local descriptor path returned by
+    upload_snapshot(); mutable workspace paths are never valid serving sources.
+    """
+    served = Path(serve_path)
+    if (served.parent not in {Path("/proc/self/fd"), Path("/dev/fd")}
+            or not served.name.isdecimal() or not served.is_file()):
+        raise ArtifactIntegrityError(
+            "Instagram tunnel requires a live descriptor-pinned upload snapshot; "
+            "refusing a mutable workspace pathname")
     configured = os.getenv("INSTAGRAM_VIDEO_URL", "").strip()
     if configured:
-        return configured, lambda: None
+        raise ArtifactIntegrityError(
+            "INSTAGRAM_VIDEO_URL is an external source whose bytes cannot be bound "
+            "to the authorized digest; unset it and use the publisher-owned tunnel")
 
     binary = shutil.which("cloudflared")
     if not binary:
-        raise RuntimeError("Instagram needs a public video URL. Set INSTAGRAM_VIDEO_URL or install cloudflared for the temporary setup.")
+        raise RuntimeError(
+            "Instagram needs its publisher-owned temporary tunnel; install cloudflared "
+            "and enable INSTAGRAM_TUNNEL_FALLBACK=true")
 
     route = "/reel/" + secrets.token_urlsafe(24) + ".mp4"
-    file_size = VIDEO.stat().st_size
+    file_size = served.stat().st_size
 
     class VideoHandler(BaseHTTPRequestHandler):
         def do_HEAD(self):
@@ -131,7 +149,7 @@ def public_video_url() -> tuple[str, callable]:
             self.send_header("Content-Length", str(file_size))
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
-            with VIDEO.open("rb") as stream:
+            with served.open("rb") as stream:
                 shutil.copyfileobj(stream, self.wfile, length=1024 * 256)
 
         def log_message(self, _format, *_args):
@@ -190,7 +208,7 @@ def public_video_url() -> tuple[str, callable]:
     return video_url, cleanup
 
 
-def publish() -> dict:
+def publish(*, dry_run: bool = False) -> dict:
     version = required("META_GRAPH_API_VERSION")
     ig_user_id = required("INSTAGRAM_USER_ID")
     token = required("INSTAGRAM_ACCESS_TOKEN")
@@ -216,72 +234,109 @@ def publish() -> dict:
         caption += "\n\n" + " ".join(str(tag) for tag in hashtags[:5])
     caption = caption[:2200]
 
+    decision = authorize_publish(platform="instagram", purpose="short", data_root=ROOT,
+                                 metadata_file=METADATA, video_file=VIDEO)
+
+    # ND-M3-R1-FIX: caller-supplied URLs and environment markers are never
+    # authorization. Reject this configuration before *any* early return
+    # (including dry-run and duplicate-ledger outcomes), so every invocation
+    # reports the same unsafe external-source configuration consistently.
+    if os.getenv("INSTAGRAM_VIDEO_URL", "").strip():
+        raise ArtifactIntegrityError(
+            "INSTAGRAM_VIDEO_URL is an unverified external source; refusing to publish "
+            "bytes that cannot be bound to the authorized video digest")
+
+    if dry_run:
+        print(json.dumps({"status": "dry_run", "uploaded": False, "platform": "instagram",
+                          "title": title}))
+        return {"status": "dry_run"}
+
     key = fingerprint(ig_user_id, metadata)
     ledger = ledger_read()
     if key in ledger["instagram"]:
         previous = ledger["instagram"][key]
         print(json.dumps({"status": "skipped_duplicate", "media_id": previous.get("media_id", "")}))
         return {"status": "skipped_duplicate"}
-
-    video_url, cleanup = public_video_url()
-    base = f"{GRAPH}/{version}"
-    try:
-        created = api_json(requests.post(
-            f"{base}/{ig_user_id}/media",
-            data={"media_type": "REELS", "video_url": video_url, "caption": caption, "share_to_feed": "true"},
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=45,
-        ))
-        container_id = created.get("id")
-        if not container_id:
-            raise RuntimeError("Meta did not return an Instagram media container.")
-
-        deadline = time.time() + 12 * 60
-        status_code = "IN_PROGRESS"
-        while time.time() < deadline:
-            status = api_json(requests.get(
-                f"{base}/{container_id}",
-                params={"fields": "status_code,status"},
+    verify_protected_action_decision(decision, platform="instagram", purpose="short")
+    with upload_snapshot(VIDEO, decision["video_sha256"], root=ROOT) as snapshot:
+        video_url, cleanup = public_video_url(serve_path=snapshot.path)  # type: ignore[arg-type]
+        base = f"{GRAPH}/{version}"
+        try:
+            created = api_json(requests.post(
+                f"{base}/{ig_user_id}/media",
+                data={"media_type": "REELS", "video_url": video_url, "caption": caption, "share_to_feed": "true"},
                 headers={"Authorization": f"Bearer {token}"},
-                timeout=30,
+                timeout=45,
             ))
-            status_code = status.get("status_code", "")
-            if status_code == "FINISHED":
-                break
-            if status_code in {"ERROR", "EXPIRED"}:
-                raise RuntimeError(f"Instagram media processing ended with {status_code}.")
-            time.sleep(10)
-        if status_code != "FINISHED":
-            raise RuntimeError("Instagram media processing timed out; upload not published.")
+            container_id = created.get("id")
+            if not container_id:
+                raise RuntimeError("Meta did not return an Instagram media container.")
 
-        published = api_json(requests.post(
-            f"{base}/{ig_user_id}/media_publish",
-            data={"creation_id": container_id},
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=45,
-        ))
-        media_id = published.get("id")
-        if not media_id:
-            raise RuntimeError("Meta did not return a published Instagram media ID.")
-        ledger["instagram"][key] = {
-            "media_id": media_id,
-            "title": title,
-            "content_pillar": metadata.get("content_pillar", ""),
-            "hook": metadata.get("hook", ""),
-            "published_at": datetime.now(timezone.utc).isoformat(),
-        }
-        ledger_write(ledger)
-        print(json.dumps({"status": "published", "media_id": media_id, "title": title}))
-        return {"status": "published", "media_id": media_id}
-    finally:
-        cleanup()
+            deadline = time.time() + 12 * 60
+            status_code = "IN_PROGRESS"
+            while time.time() < deadline:
+                status = api_json(requests.get(
+                    f"{base}/{container_id}",
+                    params={"fields": "status_code,status"},
+                    headers={"Authorization": f"Bearer {token}"},
+                    timeout=30,
+                ))
+                status_code = status.get("status_code", "")
+                if status_code == "FINISHED":
+                    break
+                if status_code in {"ERROR", "EXPIRED"}:
+                    raise RuntimeError(f"Instagram media processing ended with {status_code}.")
+                time.sleep(10)
+            if status_code != "FINISHED":
+                raise RuntimeError("Instagram media processing timed out; upload not published.")
+
+            published = api_json(requests.post(
+                f"{base}/{ig_user_id}/media_publish",
+                data={"creation_id": container_id},
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=45,
+            ))
+            media_id = published.get("id")
+            if not media_id:
+                raise RuntimeError("Meta did not return a published Instagram media ID.")
+            ledger["instagram"][key] = {
+                "media_id": media_id,
+                "title": title,
+                "content_pillar": metadata.get("content_pillar", ""),
+                "hook": metadata.get("hook", ""),
+                "published_at": datetime.now(timezone.utc).isoformat(),
+            }
+            try:
+                ledger_write(ledger)
+            except OSError as exc:
+                # The Reel is already live; retrying the publish would duplicate it.
+                print(json.dumps({"status": "ambiguous", "uploaded": True, "media_id": media_id,
+                                  "reason": "Instagram published but the local duplicate ledger could not "
+                                            "be written; reconcile before retrying",
+                                  "error": type(exc).__name__}, ensure_ascii=False))
+                return {"status": "ambiguous", "media_id": media_id}
+            print(json.dumps({"status": "published", "media_id": media_id, "title": title}))
+            return {"status": "published", "media_id": media_id}
+        finally:
+            cleanup()
 
 
 if __name__ == "__main__":
     try:
-        publish()
+        outcome = publish(dry_run="--dry-run" in sys.argv)
+    except PublishNotAuthorized as exc:
+        code, reason = authorization_error(exc)
+        print(json.dumps({"status": code, "reason": reason}, ensure_ascii=False))
+        raise SystemExit(2)
+    except ArtifactIntegrityError as exc:
+        # ND-M3-F1: digests diverged after authorization; Meta fetched nothing.
+        print(json.dumps({"status": "blocked_artifact_integrity", "uploaded": False,
+                          "reason": str(exc)}, ensure_ascii=False))
+        raise SystemExit(2)
     except Exception as exc:
         print(f"Instagram Reel publish failed: {type(exc).__name__}: {exc}", file=sys.stderr)
         raise SystemExit(1)
+    if outcome.get("status") == "ambiguous":
+        raise SystemExit(3)
 
 

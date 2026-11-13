@@ -1,0 +1,167 @@
+"""Ranked specialist/tool candidates with explicit qualification gates.
+
+This catalogue is advisory metadata only: it does not install, invoke or grant
+permissions to any external tool.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, asdict
+
+@dataclass(frozen=True)
+class ToolCandidate:
+    id: str
+    capability: str
+    role: str
+    rank: int
+    deployment: str
+    license: str
+    cost_model: str
+    status: str
+    strengths: tuple[str, ...]
+    limitations: tuple[str, ...]
+    replacement_for: str | None = None
+    requires_approval: bool = False
+
+CATALOG = (
+    ToolCandidate("nextdecode-postgresql-autonomy", "task-storage", "local autonomy runtime queue store; not the P0 shared cloud control plane", 1,
+        "local rootless Podman service", "PostgreSQL License", "zero license/API cost; local disk and CPU", "active-local-runtime",
+        ("transactional local queue state", "row-level locking and SKIP LOCKED", "concurrent local worker safety",
+         "durable plans, tasks, dependencies, leases and heartbeats"),
+        ("single-host deployment today", "requires backup and disk-health monitoring")),
+    ToolCandidate("nextdecode-sqlite-worker", "task-storage", "local development and test adapter", 2,
+        "local embedded database", "Public Domain", "zero software cost", "fallback-candidate",
+        ("simple local tests", "no server process", "small embedded cache"),
+        ("not the authoritative local runtime queue when PostgreSQL is configured", "directory and file-open failures under current WSL runtime"),
+        "nextdecode-postgresql-autonomy"),
+    ToolCandidate("supabase-postgres", "task-storage", "managed PostgreSQL fallback", 2,
+        "hosted", "PostgreSQL-compatible service; provider terms apply", "free tier/limits may change; approval required", "approval-required",
+        ("managed backups and availability", "PostgreSQL ecosystem", "easy remote control-plane"),
+        ("account and network dependency", "free-tier limits and data residency must be checked"),
+        "nextdecode-postgresql-autonomy", True),
+    ToolCandidate("neon-postgres", "task-storage", "serverless PostgreSQL fallback", 3,
+        "hosted", "PostgreSQL-compatible service; provider terms apply", "free tier/limits may change; approval required", "approval-required",
+        ("managed PostgreSQL", "branching and scale-to-zero options"),
+        ("network dependency", "provider limits and cold-start behaviour must be checked"),
+        "nextdecode-postgresql-autonomy", True),
+    ToolCandidate("cockroachdb", "task-storage", "distributed PostgreSQL-wire-compatible alternative", 4,
+        "self-hosted or hosted", "source-available; verify current terms", "infrastructure and operations cost", "candidate",
+        ("distributed SQL", "PostgreSQL wire protocol", "multi-node resilience"),
+        ("not a drop-in PostgreSQL semantic replacement", "unnecessary complexity for current single-host workload"),
+        "nextdecode-postgresql-autonomy"),
+    ToolCandidate("nextdecode-autonomy-core", "workflow-engine", "application-owned local planner, DAG queue and worker runtime", 1,
+        "local project runtime", "project", "zero API/license cost; local compute and disk", "active-local-runtime",
+        ("validated capability allow-list", "transactional PostgreSQL task DAG", "worker leases and retries",
+         "sandboxed specialists", "artifact evidence and evaluator"),
+        ("local runtime only; not canonical P0 WP2-WP6 implementation",
+         "single-host until the accepted shared cloud control plane is integrated")),
+    ToolCandidate("temporal-self-hosted", "workflow-engine", "distributed durable workflow engine", 2,
+        "self-hosted", "MIT", "infrastructure and operations cost", "candidate",
+        ("durable workflows", "replay", "distributed workers"),
+        ("higher operational footprint", "not a database replacement; requires separate acceptance testing"),
+        "nextdecode-autonomy-core"),
+    ToolCandidate("celery", "workflow-engine", "distributed task queue alternative", 3,
+        "self-hosted", "BSD-3-Clause", "broker and worker operations cost", "candidate",
+        ("mature task queue", "retries and scheduling", "large integration ecosystem"),
+        ("requires Redis or RabbitMQ broker", "not equivalent to durable workflow replay"),
+        "nextdecode-autonomy-core"),
+    ToolCandidate("dramatiq", "workflow-engine", "simpler distributed task queue alternative", 4,
+        "self-hosted", "Apache-2.0", "broker and worker operations cost", "candidate",
+        ("simple actor model", "retry middleware", "Redis and RabbitMQ brokers"),
+        ("broker dependency", "DAG orchestration and durable replay need additional design"),
+        "nextdecode-autonomy-core"),
+    ToolCandidate("apscheduler", "scheduling", "in-process and background job scheduler", 1,
+        "local", "MIT", "zero software cost", "candidate",
+        ("cron and interval schedules", "lightweight scheduling"),
+        ("not a durable task queue or DAG engine", "must not own shared workflow state"),
+        "nextdecode-autonomy-core"),
+    ToolCandidate("playwright", "browser-automation", "browser automation", 1,
+        "local", "Apache-2.0", "zero software cost; browser storage/CPU", "candidate",
+        ("Chromium/Firefox/WebKit", "deterministic browser tests", "trace and screenshot evidence"),
+        ("browser sessions need sandboxing", "CAPTCHA/MFA require human handoff")),
+    ToolCandidate("selenium", "browser-automation", "browser automation fallback", 2,
+        "local", "Apache-2.0", "zero software cost; browser storage/CPU", "fallback-candidate",
+        ("mature ecosystem", "broad browser driver support"),
+        ("driver lifecycle complexity", "less integrated tracing"),
+        "playwright"),
+    ToolCandidate("ffmpeg", "editorial-rendering", "media render and mux", 1,
+        "local", "LGPL/GPL build-dependent", "zero software cost; CPU time", "active",
+        ("fast media I/O", "filter graph", "codec and mux support"),
+        ("not a full nonlinear editor", "build licensing must be checked")),
+    ToolCandidate("opentimelineio", "editorial-interchange", "timeline interchange", 1,
+        "local", "Apache-2.0", "zero software cost", "candidate",
+        ("editorial timeline model", "frame-accurate tracks", "NLE interchange"),
+        ("does not render media", "target NLE round-trip must be tested")),
+    ToolCandidate("blender", "editorial-3d", "3D animation and compositing", 1,
+        "local", "GPL-3.0-or-later", "zero software cost; substantial CPU/RAM/GPU", "candidate",
+        ("3D scenes", "camera animation", "compositing"),
+        ("resource heavy on current integrated-GPU machine", "not a general task queue")),
+    ToolCandidate("remotion", "editorial-motion-graphics", "React motion graphics", 1,
+        "local/server render", "special terms; verify before adoption", "free tier and commercial terms vary", "candidate",
+        ("React components", "keyframes", "kinetic typography", "programmatic compositions"),
+        ("commercial license thresholds", "rendering can be CPU/memory intensive")),
+    ToolCandidate("kdenlive", "editorial-finishing", "human nonlinear editor", 1,
+        "local desktop", "GPL-3.0-or-later", "zero software cost", "candidate",
+        ("multitrack editing", "human finishing", "proxy workflows"),
+        ("not an unattended orchestration runtime")),
+    ToolCandidate("ollama", "local-model-runtime", "local model serving", 1,
+        "local", "MIT server; model licenses vary", "zero software cost; model storage and compute", "active-local-runtime",
+        ("local inference", "no per-request API bill"),
+        ("current host memory is constrained", "model weights have separate licenses")),
+    ToolCandidate("opencode", "coding-specialist", "coding agent", 1,
+        "local CLI", "MIT", "model provider may be metered", "candidate",
+        ("repository-aware coding workflows", "tool integrations"),
+        ("model/API cost and permissions must be controlled")),
+    ToolCandidate("aider", "coding-specialist", "coding agent fallback", 2,
+        "local CLI", "Apache-2.0", "model provider may be metered", "fallback-candidate",
+        ("git-aware edits", "terminal workflow"),
+        ("model/API cost and permissions must be controlled"), "opencode"),
+    ToolCandidate("existing-research-desk", "research", "source extraction and claim review", 1,
+        "local project module", "project", "zero default external spend", "active",
+        ("source-aware extraction", "claim provenance", "existing pipeline integration"),
+        ("feed coverage and network sources need qualification")),
+    ToolCandidate("exa", "research", "external research search", 2,
+        "hosted API", "commercial terms; verify", "usage-based/free limits may change", "approval-required",
+        ("broad web and company research", "semantic retrieval"),
+        ("external network and possible metered usage", "not default-on"),
+        "existing-research-desk", True),
+    ToolCandidate("python-stdlib", "data-analysis", "deterministic bounded data analysis", 1,
+        "local", "PSF License", "zero software cost", "active",
+        ("no extra dependency", "deterministic profiling", "bounded in-memory transforms", "inline CSV parsing without filesystem or network access"),
+        ("not intended for large analytical warehouses")),
+    ToolCandidate("duckdb", "data-analysis", "embedded analytical SQL engine", 2,
+        "local", "MIT", "zero software cost; local CPU/storage", "candidate",
+        ("columnar analytics", "Parquet and CSV support", "embedded execution"),
+        ("extension/network access must be controlled", "not yet integrated into autonomy sandbox"),
+        "python-stdlib"),
+    ToolCandidate("pandas", "data-analysis", "tabular analysis fallback", 3,
+        "local", "BSD-3-Clause", "zero software cost; memory usage", "candidate",
+        ("mature dataframe API", "broad ecosystem"),
+        ("large memory footprint for wide/large datasets", "not yet integrated into autonomy sandbox"),
+        "python-stdlib"),
+    ToolCandidate("python-stdlib-office-extract", "document-extraction", "bounded inline DOCX/XLSX text extraction", 1,
+        "local in-process", "PSF License", "zero software cost", "active-local-runtime",
+        ("no added dependency", "inline bytes only; no arbitrary paths", "ZIP member/size/ratio and XML DTD bounds",
+         "no filesystem, network, macro execution or formula evaluation"),
+        ("DOCX/XLSX only; PDF and legacy Office formats unsupported",
+         "direct task only; no planner routing or canonical WP4 artifact registration")),
+    ToolCandidate("pypdf", "document-extraction", "PDF text extraction", 1,
+        "local", "BSD-3-Clause", "zero software cost", "candidate",
+        ("local PDF parsing", "no hosted API required"),
+        ("scanned PDFs require OCR", "file access and decompression limits must be enforced")),
+    ToolCandidate("python-docx", "document-extraction", "DOCX text and structure extraction", 1,
+        "local", "MIT", "zero software cost", "candidate",
+        ("paragraph and table extraction", "local processing"),
+        ("does not render documents", "file access and archive limits must be enforced")),
+    ToolCandidate("openpyxl", "document-extraction", "XLSX workbook inspection", 1,
+        "local", "MIT", "zero software cost", "candidate",
+        ("worksheet and cell extraction", "local processing"),
+        ("large workbook memory limits", "formula evaluation is not provided")),
+
+)
+
+def rank_candidates(capability: str) -> list[dict]:
+    candidates = [item for item in CATALOG if item.capability == capability]
+    return [asdict(item) for item in sorted(candidates, key=lambda item: (item.rank, item.id))]
+
+def list_capabilities() -> list[str]:
+    return sorted({item.capability for item in CATALOG})

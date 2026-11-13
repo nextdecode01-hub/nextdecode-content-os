@@ -2,7 +2,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-import multi_model_ai
+from app.providers import multi_model_ai as multi_model_ai
 from app.script import longform as longform_script
 from app.script import short as create_short
 
@@ -167,7 +167,7 @@ class GenerateJsonTests(unittest.TestCase):
         source_url = "https://example.com/research"
         research = [{"title": "Example AI research", "url": source_url, "summary": "A verified source."}]
         sentence = "Researchers tested a small tool that turns sketches into simple animations, while the experiment still has limits for real world use."
-        voice_text = " ".join([sentence] * 4)
+        voice_text = " ".join([sentence] * 5)
         parsed = {
             "content_pillar": "How It Works",
             "hook": sentence,
@@ -265,3 +265,84 @@ class GenerateJsonTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
+class GeminiSdkTests(unittest.TestCase):
+    def setUp(self):
+        self.environment = patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}, clear=True)
+        self.environment.start()
+        self.addCleanup(self.environment.stop)
+
+    def test_uses_google_genai_client_and_millisecond_timeout(self):
+        from types import SimpleNamespace
+        from unittest.mock import MagicMock
+        from google import genai
+
+        response = SimpleNamespace(
+            text='{"ok": true}',
+            usage_metadata=SimpleNamespace(total_token_count=12),
+        )
+        client = MagicMock()
+        client.models.generate_content.return_value = response
+        with patch.object(genai, "Client", return_value=client) as factory:
+            result = multi_model_ai.call_gemini(
+                "prompt", model="gemini-test", timeout=17, json_mode=True
+            )
+
+        self.assertEqual(result, '{"ok": true}')
+        factory.assert_called_once()
+        self.assertEqual(factory.call_args.kwargs["api_key"], "test-key")
+        self.assertEqual(factory.call_args.kwargs["http_options"].timeout, 17000)
+        call = client.models.generate_content.call_args.kwargs
+        self.assertEqual(call["model"], "gemini-test")
+        self.assertEqual(call["contents"], "prompt")
+        self.assertEqual(call["config"].response_mime_type, "application/json")
+        client.close.assert_called_once()
+
+    def test_rejects_missing_api_key_without_constructing_client(self):
+        from google import genai
+
+        with patch.dict(os.environ, {"GEMINI_API_KEY": ""}), patch.object(genai, "Client") as factory:
+            with self.assertRaisesRegex(RuntimeError, "Set GEMINI_API_KEY"):
+                multi_model_ai.call_gemini("prompt", model="gemini-test")
+        factory.assert_not_called()
+
+    def test_falls_through_models_and_reports_failure_types(self):
+        from unittest.mock import MagicMock
+        from google import genai
+
+        client = MagicMock()
+        client.models.generate_content.side_effect = [TimeoutError(), RuntimeError("private detail")]
+        with (
+            patch.object(multi_model_ai, "gemini_model_chain", return_value=["gemini-a", "gemini-b"]),
+            patch.object(genai, "Client", return_value=client),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "gemini-a TimeoutError, gemini-b RuntimeError"):
+                multi_model_ai.call_gemini("prompt")
+        self.assertEqual(client.models.generate_content.call_count, 2)
+        client.close.assert_called_once()
+
+
+
+def test_ollama_requests_have_a_bounded_generation_token_limit():
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"message": {"content": "{\"ok\":true}"}, "eval_count": 12}
+
+    with (
+        patch.dict(os.environ, {"OLLAMA_BASE_URL": "http://127.0.0.1:11434", "OLLAMA_MODEL": "gemma3:4b"}),
+        patch.object(multi_model_ai, "_check_provider_budget"),
+        patch.object(multi_model_ai, "_increment_usage"),
+        patch.object(multi_model_ai.requests, "post", return_value=FakeResponse()) as post,
+    ):
+        result = multi_model_ai.call_ollama("bounded prompt", temperature=0.2, timeout=180, json_mode=True)
+
+    assert result == "{\"ok\":true}"
+    payload = post.call_args.kwargs["json"]
+    assert payload["options"]["num_predict"] == 512
+    assert payload["format"] == "json"
+    assert post.call_args.kwargs["timeout"] == 180

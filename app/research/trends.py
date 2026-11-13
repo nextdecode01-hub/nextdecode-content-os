@@ -52,7 +52,7 @@ from difflib import SequenceMatcher
 from html import unescape
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, urlencode, urlparse
 
 import requests
 from dotenv import load_dotenv
@@ -362,6 +362,18 @@ def _context_text(candidate: dict[str, Any]) -> str:
 
 def _is_relevant(candidate: dict[str, Any]) -> bool:
     return bool(TECH_TERMS.search(_context_text(candidate)))
+
+
+WIKIPEDIA_SOURCE_LABELS = {"wikipedia", "wiki", "wikipedia trending"}
+WIKIPEDIA_HOST_SUFFIXES = ("wikipedia.org", "wikimedia.org")
+
+
+def _is_wikipedia_source(candidate: dict[str, Any]) -> bool:
+    """True when a discovery candidate originates from Wikipedia or Wikimedia."""
+    if str(candidate.get("source") or "").strip().lower() in WIKIPEDIA_SOURCE_LABELS:
+        return True
+    host = str(urlparse(str(candidate.get("url") or candidate.get("source_url") or "")).netloc).lower()
+    return any(host == suffix or host.endswith("." + suffix) for suffix in WIKIPEDIA_HOST_SUFFIXES)
 
 
 def _url_tier(url: str) -> str:
@@ -1132,6 +1144,14 @@ def fetch_all(sources: Any = None, include_general: bool = False) -> dict[str, A
                 errors[name] = "no candidates returned"
     if not include_general:
         candidates = [item for item in candidates if _is_relevant(item)]
+    # Wikipedia/Wikimedia entries reach this aggregator through the default source
+    # list, other feeds and the on-disk feed cache; the research-source policy excludes
+    # them from discovery (selector applies the same rule at scoring time).
+    kept = [item for item in candidates if not _is_wikipedia_source(item)]
+    if len(kept) != len(candidates):
+        errors["wikipedia_filter"] = (
+            f"{len(candidates) - len(kept)} Wikipedia/Wikimedia candidate(s) excluded from discovery")
+    candidates = kept
     return {
         "candidates": candidates,
         "errors": errors,
@@ -1420,7 +1440,7 @@ def summarize_trends(candidates: Any, k: int = 3) -> list[dict[str, Any]]:
     limit = max(1, int(k))
     shortlist = pool[:max(limit * 3, limit)]
     try:
-        import multi_model_ai
+        from app.providers import multi_model_ai
         payload = multi_model_ai.generate_json(_summary_prompt(shortlist, limit),
                                                temperature=0.7, timeout=120)
     except Exception:

@@ -5,13 +5,19 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from approval_integrity import approved_today, sha256_file, upload_window_open
-import publish_all
-import scheduled_publish
-from approval_integrity import IST
+from app.security.approval_integrity import approved_today, sha256_file, upload_window_open
+from app.publish import orchestration as publish_all
+from app.publish import scheduler as scheduled_publish
+from app.security.approval_integrity import IST
 
 
 class ApprovalIntegrityTests(unittest.TestCase):
+    def test_root_compatibility_shim_preserves_canonical_module_identity(self):
+        import app.security.approval_integrity as canonical
+        from app.security import approval_integrity as legacy
+
+        self.assertIs(legacy, canonical)
+
     def test_file_hash_changes_when_file_changes(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             target = Path(temp_dir) / "content.mp4"
@@ -66,19 +72,38 @@ class ApprovalIntegrityTests(unittest.TestCase):
             }
             package_path = root / "package.json"
             package_path.write_text(json.dumps({
-                "status": "approved",
-                "approved_at": approved_at,
+                "status": "pending_human_review",
                 "title": metadata["title"],
                 "hook": metadata["hook"],
                 "content_pillar": metadata["content_pillar"],
                 "visuals": visuals,
                 **hashes,
             }), encoding="utf-8")
-            (data_dir / "review_approved.json").write_text(json.dumps({
+            decision_path = data_dir / "review_approvals" / "decision.json"
+            decision_path.parent.mkdir(parents=True, exist_ok=True)
+            decision = {
                 "status": "approved",
                 "approved_at": approved_at,
                 "package": str(package_path),
+                "review_package_sha256": sha256_file(package_path),
+                "reviewer": "test-reviewer",
+                "rationale": "verified test fixture",
+                "purpose": "short",
+                "platform": "youtube",
+                "destination": "private",
+                "checklist": {name: True for name in (
+                    "two_sources_checked", "primary_source_checked",
+                    "real_demo_or_original_visual", "limitation_stated",
+                    "captions_audio_and_9x16_checked", "platform_copy_checked",
+                    "publish_approved")},
                 **hashes,
+            }
+            decision_path.write_text(json.dumps(decision), encoding="utf-8")
+            (data_dir / "review_approved.json").write_text(json.dumps({
+                "status": "approved",
+                "package": str(package_path),
+                "decision_record": str(decision_path),
+                "decision_record_sha256": sha256_file(decision_path),
             }), encoding="utf-8")
 
             with patch.object(publish_all, "ROOT", root):

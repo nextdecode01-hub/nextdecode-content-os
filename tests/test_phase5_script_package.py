@@ -112,7 +112,8 @@ def test_dry_run_uses_local_voice_and_writes_separate_metadata(tmp_path) -> None
         patch("app.voice.provider.probe_duration", return_value=30.0),
         patch.object(short_pipeline, "_dry_run_background"),
         patch.object(short_pipeline, "render_final_short"),
-        patch("motion_render.make_kinetic_ass"),
+        patch.dict("os.environ", {"STORYBOARD_GATE": "warn"}),
+        patch("app.render.subtitles.make_kinetic_ass"),
     ):
         metadata = short_pipeline.run_dry_run(tmp_path / "work", tmp_path / "metadata_dry_run.json")
 

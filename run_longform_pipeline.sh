@@ -15,6 +15,6 @@ if ! command -v "$PYTHON" >/dev/null 2>&1; then
     exit 1
 fi
 "$PYTHON" "$ROOT/pipelines/longform.py"
-"$PYTHON" "$ROOT/review_longform.py"
-"$PYTHON" "$ROOT/notify_review.py" longform
+"$PYTHON" -m app.review.review_longform
+"$PYTHON" -m app.notifications.notify_review longform
 echo "Long-form video is queued for human review; no upload was started."

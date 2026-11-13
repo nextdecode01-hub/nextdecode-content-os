@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 import requests
 from dotenv import load_dotenv
 
-import multi_model_ai
+from app.providers import multi_model_ai
 from app.research.topics import discover_topics, search_related_news
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -321,8 +321,14 @@ def _validate_script(parsed: dict, voice_text: str, selected: dict, research: li
     return hook, evidence_notes
 
 
-def generate_script(topic: str = "") -> dict:
-    research = discover_topics(ROOT / "data" / "used_topics.txt", limit=8)
+def generate_script(topic: str = "", research_candidates: list[dict] | None = None) -> dict:
+    research = (
+        research_candidates
+        if research_candidates is not None
+        else discover_topics(ROOT / "data" / "used_topics.txt", limit=8)
+    )
+    if not isinstance(research, list):
+        raise RuntimeError("Research candidates must be a list.")
     if not multi_model_ai.is_configured():
         raise RuntimeError("Configure OmniRoute, Gemini, Groq, or Ollama before generating long-form content.")
     selected, selection = _select_topic(research, topic.strip())
@@ -390,10 +396,27 @@ Return only valid JSON with exactly these fields:
     parsed = multi_model_ai.generate_json(prompt, temperature=0.35, timeout=timeout)
     voice_text = re.sub(r"\s+", " ", str(parsed.get("voice_text", "")).strip())
     words = len(voice_text.split())
+    repair_attempts = 0
+    while not PROFILE["min_words"] <= words <= PROFILE["max_words"] and repair_attempts < 2:
+        repair_attempts += 1
+        target_min = PROFILE["min_words"] + 80
+        target_max = PROFILE["max_words"] - 40
+        repair_action = "Expand with source-supported explanation, context and concrete examples" if words < PROFILE["min_words"] else "Tighten by removing repetition while preserving evidence and structure"
+        repair_prompt = (
+            prompt
+            + f"\n\nLENGTH REPAIR {repair_attempts}/2: the current voice_text has {words} words. "
+              f"{repair_action} to {target_min}–{target_max} spoken words; accepted range "
+              f"{PROFILE['min_words']}–{PROFILE['max_words']}. Do not invent facts, claims, numbers, "
+              "quotes or sources. Count voice_text words only. Return the complete replacement JSON.\n"
+              f"CURRENT VOICE_TEXT:\n{voice_text}"
+        )
+        parsed = multi_model_ai.generate_json(repair_prompt, temperature=0.15, timeout=timeout)
+        voice_text = re.sub(r"\s+", " ", str(parsed.get("voice_text", "")).strip())
+        words = len(voice_text.split())
     if not str(parsed.get("title", "")).strip() or len(str(parsed["title"]).strip()) > 90:
         raise RuntimeError("Long-form title is missing or too long.")
     if not PROFILE["min_words"] <= words <= PROFILE["max_words"]:
-        raise RuntimeError(f"Long-form script has {words} words; expected {PROFILE['min_words']}-{PROFILE['max_words']}.")
+        raise RuntimeError(f"Long-form script has {words} words after {repair_attempts} bounded repairs; expected {PROFILE['min_words']}-{PROFILE['max_words']}.")
     hook, evidence_notes = _validate_script(parsed, voice_text, selected, research_documents)
     chapters = _chapter_visuals(parsed.get("chapters", []))
     title = str(parsed["title"]).strip()

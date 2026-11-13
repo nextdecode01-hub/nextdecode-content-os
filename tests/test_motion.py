@@ -1,12 +1,14 @@
 import json
+import os
 import shutil
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-import motion_director
-import motion_render
+from app.visuals import motion_director as motion_director
+from app.render import legacy_api as motion_render
 
 FFMPEG = shutil.which("ffmpeg")
 FFPROBE = shutil.which("ffprobe")
@@ -83,6 +85,24 @@ class PlanShotsTests(unittest.TestCase):
         )
         self.assertGreaterEqual(len(shots), 8)
 
+    def test_one_shot_per_beat_avoids_repeated_claims(self):
+        beats = [{"text": f"Beat {i} explains a different point"} for i in range(12)]
+        shots = motion_director.plan_shots({"beat_sheet": beats}, audio_duration=30.0)
+        self.assertEqual(len(shots), 12)
+        claims = [shot["claim"] for shot in shots]
+        self.assertEqual(len(set(claims)), 12)
+
+    def test_beat_labels_are_carried_to_shots(self):
+        beats = [
+            {"text": "Hook line", "label": "hook"},
+            {"text": "Mechanism line", "label": "mechanism"},
+            {"text": "Payoff line", "label": "payoff"},
+            {"text": "Close line", "label": "payoff"},
+        ]
+        shots = motion_director.plan_shots({"beat_sheet": beats}, audio_duration=24.0)
+        self.assertEqual(shots[0]["beat_label"], "hook")
+        self.assertIn("mechanism", {shot["beat_label"] for shot in shots})
+
 
 class KenBurnsFilterTests(unittest.TestCase):
     def test_filter_is_non_empty_and_contains_zoompan(self):
@@ -92,7 +112,17 @@ class KenBurnsFilterTests(unittest.TestCase):
         self.assertIsInstance(f, str)
         self.assertTrue(len(f) > 0)
         self.assertIn("zoompan", f)
-        self.assertIn("d=90", f)
+        self.assertIn("d=1", f)
+        self.assertIn("pow(", f)
+        self.assertNotIn("d=90", f)
+
+    def test_native_video_uses_fixed_crop_not_zoompan(self):
+        shot = {"index": 1, "duration": 3.0,
+                "motion": {"mode": "native", "zoom_from": 1.04, "zoom_to": 1.04}}
+        f = motion_render.build_ken_burns_filter(shot)
+        self.assertIn("scale=", f)
+        self.assertIn("crop=1080:1920", f)
+        self.assertNotIn("zoompan", f)
 
     def test_filter_passes_ffmpeg_validation(self):
         if not HAS_FFMPEG:
@@ -107,6 +137,80 @@ class KenBurnsFilterTests(unittest.TestCase):
         ]
         completed = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         self.assertEqual(completed.returncode, 0, completed.stderr[-500:])
+
+
+class SceneMotionPlanTests(unittest.TestCase):
+    def _shots(self, count=6, duration=2.5):
+        return [
+            {"index": i, "start": i * duration, "end": (i + 1) * duration,
+             "duration": duration, "zoom_from": 1.0, "zoom_to": 1.14,
+             "pan": {"x": 6.0, "y": 0.0}}
+            for i in range(count)
+        ]
+
+    def test_video_footage_keeps_native_motion_at_cut_scale(self):
+        shots = self._shots(3)
+        details = [
+            {"scene_type": "typography", "path": "/tmp/card.png"},
+            {"scene_type": "footage", "path": "/tmp/clip.mp4"},
+            {"scene_type": "chart", "path": "/tmp/chart.png"},
+        ]
+        motions = motion_director.assign_motion(shots, details, width=1080)
+        self.assertEqual(motions[1]["mode"], "native")
+        self.assertEqual(shots[1]["zoom_from"], shots[1]["zoom_to"])
+        self.assertAlmostEqual(shots[1]["zoom_from"], shots[0]["zoom_to"], places=3)
+        self.assertAlmostEqual(shots[2]["zoom_from"], shots[1]["zoom_to"], delta=0.01)
+
+    def test_stills_alternate_zoom_direction_within_bounds(self):
+        shots = self._shots(6)
+        details = [{"scene_type": "photo_footage", "path": f"/tmp/p{i}.jpg"}
+                   for i in range(6)]
+        motions = motion_director.assign_motion(shots, details, width=1080)
+        for motion in motions:
+            self.assertGreaterEqual(motion["zoom_from"], 1.0)
+            self.assertLessEqual(motion["zoom_to"], 1.08)
+            self.assertLessEqual(abs(motion["pan"]["x0"]), 1080 * 0.012 + 0.1)
+            self.assertLessEqual(abs(motion["pan"]["x1"]), 1080 * 0.012 + 0.1)
+        directions = [
+            (motion["zoom_to"] > motion["zoom_from"]) for motion in motions
+        ]
+        for left, right in zip(directions, directions[1:]):
+            self.assertNotEqual(left, right, "zoom direction should alternate")
+
+    def test_text_cards_do_not_pan(self):
+        shots = self._shots(2)
+        details = [{"scene_type": "typography", "path": f"/tmp/c{i}.png"}
+                   for i in range(2)]
+        motions = motion_director.assign_motion(shots, details)
+        for motion in motions:
+            self.assertEqual(motion["pan"]["x0"], 0.0)
+            self.assertEqual(motion["pan"]["x1"], 0.0)
+
+    def test_gradient_caption_uses_still_text_profile(self):
+        shots = self._shots(1)
+        details = [{"scene_type": "footage", "provider": "gradient",
+                    "path": "/tmp/gradient.mp4"}]
+        motions = motion_director.assign_motion(shots, details)
+        self.assertEqual(motions[0]["profile"], "gradient_text_card")
+        self.assertEqual(motions[0]["mode"], "kenburns")
+        self.assertLessEqual(motions[0]["zoom_to"], 1.04)
+        self.assertEqual(motions[0]["pan"]["x0"], 0.0)
+
+    def test_per_cut_sfx_are_off_by_default(self):
+        with patch.dict(os.environ, {"SHOT_SFX": ""}):
+            shots = motion_director.plan_shots(
+                {"beat_sheet": [{"text": f"Beat {i} about AI coding"} for i in range(10)]},
+                audio_duration=30.0,
+            )
+        self.assertEqual({shot["sfx"] for shot in shots}, {"none"})
+
+    def test_per_cut_sfx_can_be_opted_in(self):
+        with patch.dict(os.environ, {"SHOT_SFX": "on"}):
+            shots = motion_director.plan_shots(
+                {"beat_sheet": [{"text": f"Beat {i} about AI coding"} for i in range(10)]},
+                audio_duration=30.0,
+            )
+        self.assertIn("whoosh", {shot["sfx"] for shot in shots})
 
 
 class RenderPlanTests(unittest.TestCase):
@@ -126,6 +230,38 @@ class RenderPlanTests(unittest.TestCase):
 
 
 @unittest.skipUnless(HAS_FFMPEG, "ffmpeg/ffprobe required")
+class LegacyAssetResolverTests(unittest.TestCase):
+    def test_procedural_source_needs_no_network(self):
+        with tempfile.TemporaryDirectory() as td:
+            detail = motion_render.resolve_asset_detail(
+                {"index": 0, "source": "procedural", "asset_query": "servers"}, Path(td))
+
+        self.assertIsNone(detail["path"])
+        self.assertEqual(detail["provider"], "procedural")
+
+    def test_demo_source_uses_owner_recording(self):
+        with tempfile.TemporaryDirectory() as td:
+            demo = Path(td) / "demo.mp4"
+            demo.write_bytes(b"x")
+            with patch.dict(os.environ, {"DEMO_VIDEO_PATH": str(demo)}):
+                detail = motion_render.resolve_asset_detail({"index": 0, "source": "demo"}, Path(td))
+
+        self.assertEqual(detail["provider"], "demo")
+        self.assertEqual(detail["path"], str(demo))
+
+    def test_stock_source_delegates_to_canonical_chain(self):
+        with tempfile.TemporaryDirectory() as td:
+            asset = {"path": str(Path(td) / "a.jpg"), "title": "t", "license": "CC0"}
+            with patch.object(motion_render.visual_chain, "_pixabay_asset", return_value=None), patch.object(
+                motion_render.visual_chain, "_wikimedia_asset", return_value=asset
+            ):
+                detail = motion_render.resolve_asset_detail(
+                    {"index": 1, "source": "pixabay", "asset_query": "servers"}, Path(td))
+
+        self.assertEqual(detail["provider"], "pixabay")
+        self.assertEqual(detail["path"], asset["path"])
+
+
 class IntegrationRenderTests(unittest.TestCase):
     def test_render_3_shot_synthetic_video(self):
         with tempfile.TemporaryDirectory() as td:
@@ -149,7 +285,13 @@ class IntegrationRenderTests(unittest.TestCase):
                             "-t", "10", "-c:a", "pcm_s16le", str(audio)],
                            check=True, capture_output=True)
             out = td / "out.mp4"
-            result = motion_render.render_video(shots, audio, out, work_dir=td, ass_path=None)
+            # Test-only gate: this case covers render mechanics (motion, dimensions,
+            # audio).  Production keeps STORYBOARD_GATE=require.
+            with patch.dict(os.environ, {"STORYBOARD_GATE": "warn"}), \
+                    patch("app.visuals.stock_fetcher.fetch_shot_image", return_value=None):
+                # This test validates rendering mechanics, not live Wikimedia
+                # availability; keep the integration render hermetic.
+                result = motion_render.render_video(shots, audio, out, work_dir=td, ass_path=None)
 
             self.assertTrue(out.exists())
             self.assertGreater(out.stat().st_size, 20_000)

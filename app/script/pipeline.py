@@ -19,11 +19,15 @@ import time
 from pathlib import Path
 from typing import Any
 
-import motion_director
-import motion_render
+from app.visuals import motion_director
+from app.visuals import shotplan as shot_planner
+from app.render.assembly import render_video
+from app.render.ffmpeg_tools import qa_video
+from app.render.subtitles import make_kinetic_ass
 from app.script import studio as script_studio
 from app.voice import provider as voice_provider
 from app.research import desk as research_desk
+from app.research import claims as claims_ledger
 from app.research import selector as topic_selector
 from app.research.topics import discover_topics
 
@@ -139,24 +143,84 @@ def estimated_words(text: str, duration: float) -> list[dict]:
 
 
 def build_captions(script: dict, audio_path: Path, ass_path: Path, duration: float) -> dict:
-    """Produce the kinetic caption file."""
+    """Produce the kinetic caption file, preferring script spelling."""
     words = transcribe_words(audio_path)
     source = "transcribed"
     if not words:
         words = estimated_words(script.get("voice_text", ""), duration)
         source = "estimated"
-    motion_render.make_kinetic_ass(words, ass_path)
+    else:
+        from app.render.subtitles import align_script_to_asr
+        aligned = align_script_to_asr(script.get("voice_text", ""), words)
+        if aligned:
+            words = aligned
+            source = "script_aligned"
+    make_kinetic_ass(words, ass_path)
+    words_path = ass_path.with_name("captions.words.json")
+    words_payload = {
+        "schema": "nextdecode.word-cues.v1",
+        "timing_source": source,
+        "duration_seconds": round(float(duration), 3),
+        "word_count": len(words),
+        "words": [
+            {"index": index, "word": str(word.get("word") or ""),
+             "start": round(float(word.get("start", 0.0)), 3),
+             "end": round(float(word.get("end", 0.0)), 3)}
+            for index, word in enumerate(words)
+        ],
+    }
+    temp_words = words_path.with_suffix(".json.tmp")
+    temp_words.write_text(json.dumps(words_payload, indent=2, ensure_ascii=False) + "\\n",
+                           encoding="utf-8")
+    os.replace(temp_words, words_path)
     _log(f"Captions built from {source} timings ({len(words)} words) -> {ass_path.name}")
-    return {"word_count": len(words), "timing_source": source, "path": str(ass_path)}
+    return {
+        "word_count": len(words),
+        "timing_source": source,
+        "path": str(ass_path),
+        "word_timings_path": str(words_path),
+    }
 
 
 def generate_voice(text: str, audio_path: Path) -> dict:
-    """Synthesize the voiceover through the provider chain."""
+    """Synthesize the voiceover through the provider chain.
+
+    The provider hands back a small lossy mp3, so it is decoded exactly once into
+    a 44.1 kHz 24-bit WAV master that every later stage reads.  That keeps the
+    narration from passing through two lossy generations before the video.
+    """
     voice = os.getenv("TTS_VOICE", "").strip() or None
-    result = voice_provider.synthesize_with_fallback(text, audio_path, preferred="edge_tts")
+    if os.getenv("TTS_TEXT_PREP", "").strip().lower() in {"1", "true", "yes", "on"}:
+        from app.voice import text_prep
+        text = text_prep.prepare_narration(text)
+        _log("Voice text preparation: on")
+    result = voice_provider.synthesize_with_fallback(
+        text, audio_path, preferred="edge_tts", voice=voice
+    )
     if not result.get("path"):
         raise RuntimeError(f"Voice generation failed: {result.get('error')}")
+    result["source_format"] = voice_provider.probe_audio_format(audio_path)
+    master = voice_provider.to_wav_master(audio_path, audio_path.with_suffix(".wav"))
+    if master:
+        result["master_path"] = str(master)
+        result["master_format"] = voice_provider.probe_audio_format(master)
+        # The narration deliverable: 320 kbps CBR written from the master, so the
+        # voice is never passed through a second lossy encode.  It carries the
+        # same measured loudness filter the video mix uses, so the standalone
+        # file sounds like the render rather than like the raw provider output.
+        from app.render.ffmpeg_tools import LOUDNORM_TARGET, _measure_loudnorm
+        normalize = _measure_loudnorm(master) or f"loudnorm={LOUDNORM_TARGET}"
+        exported = voice_provider.export_master_mp3(
+            master, audio_path.with_name(f"{audio_path.stem}_320k.mp3"),
+            audio_filter=normalize,
+        )
+        if exported:
+            result["export_path"] = str(exported)
+            result["export_format"] = voice_provider.probe_audio_format(exported)
     _log(f"Voice ready via {result.get('provider')} ({result.get('duration_hint', 0):.1f}s estimated)")
+    _log(f"Voice source: {result.get('source_format')}")
+    if result.get("master_path"):
+        _log(f"Voice master: {Path(result['master_path']).name}")
     return result
 
 
@@ -171,7 +235,7 @@ def probe_duration(path: Path) -> float:
 
 STOCK_PROVIDERS = {"pexels", "pixabay", "wikimedia"}
 AI_PROVIDERS = {"ai_image", "gemini", "fal", "replicate", "openai"}
-PROCEDURAL_PROVIDERS = {"procedural", "local"}
+PROCEDURAL_PROVIDERS = {"procedural", "local", "motion_graphic", "gradient"}
 
 
 def _describe_visuals(assets: list[dict], shots: list[dict]) -> dict:
@@ -252,32 +316,137 @@ def run(
     _log(f"Script: {script.get('title')} ({script.get('word_count')} words, "
          f"hook '{script.get('hook', '')[:60]}')")
 
+    # Evidence-first: every narration sentence is mapped to claim records, and the
+    # ledger is written next to the script so the render can be audited later.
+    ledger = claims_ledger.build_ledger(research, script_text=script.get("voice_text", ""))
+    ledger_path = claims_ledger.write_ledger(ledger, work / "research" / "claim_ledger.json")
+    ledger_warnings = []
+    for claim in ledger.get("claims") or []:
+        if claim["verification"]["status"] in {"unverified", "conflicting", "outdated"}:
+            ledger_warnings.append(
+                f"{claim['claim_id']} {claim['verification']['status']}: {claim['narration'][:80]}"
+            )
+    for flag in (ledger.get("script_mapping") or {}).get("flags") or []:
+        ledger_warnings.append(f"{flag['flag']}: {flag['sentence'][:80]}")
+    _log(
+        f"Claim ledger: {ledger['summary']['claims']} claim(s), "
+        f"{ledger['summary']['by_status'].get('supported', 0)} supported, "
+        f"{len(ledger_warnings)} review warning(s)"
+    )
+    step("evidence", {
+        "ledger": str(ledger_path),
+        "claims": ledger["summary"]["claims"],
+        "by_status": ledger["summary"]["by_status"],
+        "by_decision": ledger["summary"]["by_decision"],
+        "without_publication_date": ledger["summary"]["without_publication_date"],
+        "unmapped_factual_sentences": len((ledger.get("script_mapping") or {}).get("unmapped") or []),
+        "flags": len((ledger.get("script_mapping") or {}).get("flags") or []),
+        "warnings": ledger_warnings[:12],
+        "source_clusters": len(ledger.get("source_clusters") or []),
+    })
+
     audio_path = work / "voice.mp3"
     voice = generate_voice(script.get("voice_text", ""), audio_path)
+    # Every later stage reads the lossless master when one exists.
+    mix_source = Path(voice.get("master_path")) if voice.get("master_path") else audio_path
     duration = probe_duration(audio_path)
 
     ass_path = work / "subtitles.ass"
-    captions = build_captions(script, audio_path, ass_path, duration)
+    captions = build_captions(script, mix_source, ass_path, duration)
 
     shots = motion_director.plan_shots(script, audio_duration=duration)
+    shot_plan = shot_planner.plan_shot_plan(script, ledger=ledger, audio_duration=duration)
+    shots = shot_planner.annotate_shots(shots, shot_plan)
+    shot_plan_path = shot_planner.write_shot_plan(shot_plan, work / "shot_plan.json")
     plan = motion_director.estimate_render_plan(shots)
     step("shots", {"count": len(shots), "avg_shot": round(plan.get("avg_shot", 0), 2),
-                   "sources": plan.get("asset_counts", {})})
+                   "sources": plan.get("asset_counts", {}),
+                   "shot_plan": str(shot_plan_path),
+                   "shot_plan_flags": shot_plan.get("flags") or []})
     _log(f"Shot plan: {len(shots)} shots, avg {plan.get('avg_shot', 0):.2f}s")
     for shot in shots:
         print(f"      shot {shot['index']:>2} {shot['duration']:>5.2f}s {shot['source']:<10} {shot['asset_query']!r}", flush=True)
 
     output_path = work / "output_short.mp4"
-    render = motion_render.render_video(
-        shots, audio_path, output_path, work_dir=shots_dir, ass_path=ass_path
+    render = render_video(
+        shots, mix_source, output_path, work_dir=shots_dir, ass_path=ass_path,
+        caption_words_path=Path(captions["word_timings_path"]),
+        evidence={
+            "ledger": ledger,
+            "script_sha256": ledger.get("script_sha256", ""),
+            "ledger_sha256": ledger.get("ledger_sha256", ""),
+        },
     )
-    qa = motion_render.qa_video(output_path, min_duration=max(12.0, duration * 0.75), max_duration=duration * 1.35)
-    step("render", {"path": str(output_path), "duration": qa.get("duration"), "shots": render.get("shots"),
-                    "music": render.get("music"), "sfx": render.get("sfx_count")})
+    if render.get("captions_burned") is not True:
+        raise RuntimeError("production render rejected: required captions were not burned into the video")
+    qa = qa_video(
+        output_path,
+        min_duration=45.0,
+        max_duration=60.0,
+        expected_fps=30,
+        silence_db=-50.0,
+        check_black_frames=True,
+        assets=render.get("assets"),
+        captions=ass_path,
+        audio_boundaries=render.get("audio_boundaries"),
+        strict_visuals=True,
+    )
+    storyboard = render.get("storyboard") or {}
+    boundaries = render.get("audio_boundaries") or {}
+    render_duration = float(qa.get("duration") or 0.0)
+    if render_duration and abs(render_duration - duration) > 0.75:
+        qa.setdefault("warnings", []).append(
+            f"render duration {render_duration:.2f}s differs from narration {duration:.2f}s"
+        )
+    step("render", {
+        "path": str(output_path),
+        "duration": qa.get("duration"),
+        "shots": render.get("shots"),
+        "music": render.get("music"),
+        "sfx": render.get("sfx_count"),
+        "audio_mix": render.get("audio_mix_mode"),
+        "audio_settings": render.get("audio_settings"),
+        "voice": {
+            "provider": voice.get("provider"),
+            "voice": os.getenv("TTS_VOICE", "").strip() or voice_provider.DEFAULT_VOICE,
+            "source_format": voice.get("source_format"),
+            "master": Path(voice["master_path"]).name if voice.get("master_path") else None,
+            "master_format": voice.get("master_format"),
+        },
+        "audio_warning": render.get("audio_warning"),
+        "audio_boundary_flags": boundaries.get("flagged", 0),
+        "captions_burned": render.get("captions_burned"),
+        "caption_timing_source": captions.get("timing_source"),
+        "caption_word_timings": captions.get("word_timings_path"),
+        "timeline_path": render.get("timeline_path"),
+        "fallback_scenes": len(render.get("fallback_scenes") or []),
+        "qa_status": qa.get("status"),
+        "motion_sheet": render.get("motion_contact_sheet", ""),
+        "storyboard_status": storyboard.get("review_status", ""),
+        "storyboard_path": storyboard.get("json_path", ""),
+        "storyboard_contact_sheet": storyboard.get("contact_sheet", ""),
+    })
+    visual_plan = render.get("visual_plan") or {}
+    step("visuals", {
+        "providers": render.get("provider_counts") or {},
+        "scene_types": visual_plan.get("scene_types") or {},
+        "stock_used": visual_plan.get("stock_used", 0),
+        "stock_cap": visual_plan.get("stock_cap", 0),
+        "fallback_scenes": [
+            {"index": item.get("index"), "reason": item.get("fallback_reason")}
+            for item in (render.get("fallback_scenes") or [])
+        ],
+    })
     _log(f"Rendered {output_path.name}: {qa.get('duration', 0):.1f}s, {qa.get('width')}x{qa.get('height')}")
 
     source_urls = script.get("source_urls") or []
     visuals = _describe_visuals(render.get("assets") or [], shots)
+    visuals.update({
+        "scene_types": visual_plan.get("scene_types") or {},
+        "scene_plan": render.get("scene_briefs") or [],
+        "fallbacks": render.get("fallback_scenes") or [],
+        "provider_counts": render.get("provider_counts") or {},
+    })
     metadata: dict[str, Any] = {
         "quality": "strong",
         "topic": selected_topic,
@@ -298,6 +467,7 @@ def run(
         "shots": shots,
         "visuals": visuals,
         "captions": captions,
+        "captions_burned": render.get("captions_burned"),
         "critic": script.get("critic", {}),
         "slop_score": script.get("slop_score", 0),
         "research": {
@@ -311,13 +481,46 @@ def run(
                 for source in (research.get("sources") or [])
             ],
         },
+        "evidence": {
+            "ledger_path": str(ledger_path),
+            "ledger_sha256": ledger.get("ledger_sha256"),
+            "script_sha256": ledger.get("script_sha256"),
+            "summary": ledger.get("summary"),
+            "source_clusters": ledger.get("source_clusters", []),
+            "flags": (ledger.get("script_mapping") or {}).get("flags", []),
+            "unmapped_factual": (ledger.get("script_mapping") or {}).get("unmapped", []),
+            "warnings": ledger_warnings,
+            "cutouts": render.get("evidence", {}).get("cutouts", []),
+            "rights_gate": render.get("evidence", {}).get("rights_gate", {}),
+        },
+        "shot_plan": shot_planner.plan_summary(shot_plan, path=shot_plan_path),
         "topic_selection": {
             "score": chosen.get("total_score"),
             "angle": chosen.get("angle", ""),
             "method": selection.get("method", ""),
             "rejected": selection.get("rejected", [])[:5],
         },
-        "voice": {"provider": voice.get("provider"), "duration": qa.get("duration", duration)},
+        "voice": {
+            "provider": voice.get("provider"),
+            "voice": os.getenv("TTS_VOICE", "").strip() or voice_provider.DEFAULT_VOICE,
+            "prosody": {
+                "rate": os.getenv("TTS_RATE", "").strip() or voice_provider.DEFAULT_EDGE_RATE,
+                "pitch": os.getenv("TTS_PITCH", "").strip() or voice_provider.DEFAULT_EDGE_PITCH,
+                "text_prep": os.getenv("TTS_TEXT_PREP", "").strip().lower() in {"1", "true", "yes", "on"},
+            },
+            "source_format": voice.get("source_format"),
+            "master": Path(voice["master_path"]).name if voice.get("master_path") else None,
+            "duration": round(duration, 3),
+            "render_duration": qa.get("duration"),
+            "mix_mode": render.get("audio_mix_mode"),
+            "audio_settings": render.get("audio_settings"),
+            "warning": render.get("audio_warning", ""),
+        },
+        "qa": qa,
+        "storyboard": storyboard,
+        "motion": render.get("motion") or [],
+        "motion_contact_sheet": render.get("motion_contact_sheet", ""),
+        "audio_boundaries": render.get("audio_boundaries") or {},
         "steps": steps,
         "elapsed_seconds": round(time.perf_counter() - started, 1),
         "video_path": str(output_path),
@@ -342,6 +545,13 @@ def main(argv: list[str] | None = None) -> int:
         work_dir=Path(args.work_dir),
         min_topic_score=args.min_topic_score,
     )
+    # This entry point skips the orchestrator's approval, review-package and run
+    # identity steps, so its artifacts are draft-only by construction.
+    metadata["governance"] = {
+        "entry": "direct",
+        "publishable": False,
+        "reason": "the direct pipeline entry point does not run the approved orchestration",
+    }
     out_path = Path(args.out) if args.out else ROOT / "data" / "metadata_strong.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")

@@ -18,15 +18,15 @@ if "$PYTHON" "$DIR/pipelines/short.py" "$@"; then
     :
 else
     status=$?
-    "$PYTHON" "$DIR/notify_status.py" "Nextdecode Shorts Studio: video generation failed before publishing. Check the execution for details." || true
+    "$PYTHON" -m app.notifications.notify_status "Nextdecode Shorts Studio: video generation failed before publishing. Check the execution for details." || true
     exit "$status"
 fi
 
-"$PYTHON" "$DIR/review_bundle.py"
+"$PYTHON" -m app.review.review_bundle
 
 if [[ "${PUBLISH_MODE:-review}" != "publish" ]]; then
-    "$PYTHON" "$DIR/notify_review.py" short
+    "$PYTHON" -m app.notifications.notify_review short
     exit 0
 fi
 
-"$PYTHON" "$DIR/publish_all.py"
+"$PYTHON" -m app.publish.orchestration

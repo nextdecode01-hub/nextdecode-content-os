@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily NEXTDECODE autonomy PostgreSQL backup
+
+[Timer]
+OnCalendar=*-*-* 02:30:00 UTC
+Persistent=true
+RandomizedDelaySec=10m
+Unit=nextdecode-postgres-backup.service
+
+[Install]
+WantedBy=timers.target

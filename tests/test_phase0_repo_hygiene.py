@@ -28,7 +28,6 @@ REQUIRED_IGNORE_PATTERNS = {
 SECRET_NAMES = {
     ".env",
     ".env.bak-2026-10-26",
-    ".n8n-docker.env",
     "youtube_token.json",
     "token.json",
     "token_usage.json",
@@ -96,11 +95,6 @@ def test_env_example_contains_keys_only() -> None:
         assert not value, f".env.example:{lineno} ({key.strip()}) has a value; keys only"
 
 
-def test_dockerignore_excludes_secrets_and_state() -> None:
-    lines = {
-        line.strip()
-        for line in (ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
-        if line.strip() and not line.lstrip().startswith("#")
-    }
-    for required in (".env", "data/", "outputs/", "shots/", "archive/"):
-        assert required in lines, f".dockerignore missing {required}"
+def test_retired_container_bridge_has_no_deployment_files() -> None:
+    for name in ("compose.yaml", "Dockerfile.runner", ".dockerignore"):
+        assert not (ROOT / name).exists(), f"retired deployment file remains: {name}"

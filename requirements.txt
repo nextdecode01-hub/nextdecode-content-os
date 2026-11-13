@@ -2,8 +2,9 @@ python-dotenv
 groq
 openai
 anthropic
-google-generativeai
+google-genai
 requests
+fastapi==0.162.0
 edge-tts
 gTTS
 
@@ -15,8 +16,15 @@ google-api-python-client
 google-auth
 google-auth-oauthlib
 
+# PostgreSQL autonomy control-plane storage
+psycopg[binary]>=3.2,<4
+
 # Tests
 pytest
 
+# Keep the legacy gTTS fallback and Hugging Face tooling resolver-compatible.
+click>=8.1,<8.2
+huggingface-hub>=0.36.2,<1
+
 # New modules (visual_assets, voice_provider, trend_research, publish_social,
-# workspace_sync, analytics_collect) use ONLY requests + stdlib � no extra deps.
+# workspace_sync, analytics_collect) use ONLY requests + stdlib   no extra deps.

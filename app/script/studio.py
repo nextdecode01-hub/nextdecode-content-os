@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
-import multi_model_ai
+from app.providers import multi_model_ai
 from . import voice_guide
 
 
@@ -17,7 +17,7 @@ SCRIPT_PROFILES = {
     "micro_20s": {"seconds": 20, "min_words": 42, "max_words": 58},
     "standard_30s": {"seconds": 30, "min_words": 62, "max_words": 78},
     "standard_35s": {"seconds": 35, "min_words": 72, "max_words": 92},
-    "deep_45s": {"seconds": 45, "min_words": 96, "max_words": 118},
+    "deep_45s": {"seconds": 45, "min_words": 92, "max_words": 118},
     "deep_60s": {"seconds": 60, "min_words": 128, "max_words": 150},
 }
 
@@ -47,6 +47,29 @@ def _normalize_text(text: str) -> str:
     if not text:
         return ""
     return re.sub(r"\s+", " ", text).strip()
+
+
+def _opening_matches_hook(voice_text: str, hook: str) -> bool:
+    """Check the opening invariant without splitting on abbreviations/decimals."""
+    voice = _normalize_text(voice_text)
+    expected = _normalize_text(hook).rstrip(" .!?")
+    if not voice or not expected or len(voice) < len(expected):
+        return False
+    actual = voice[:len(expected)].rstrip(" .!?")
+    if actual.casefold() != expected.casefold():
+        return False
+    remainder = voice[len(expected):]
+    return not remainder or not remainder[0].isalnum()
+
+
+def _canonical_hook_sentence(hook: str) -> str:
+    """Normalize the selected hook to one complete spoken sentence."""
+    value = _normalize_text(hook).strip().strip('"').strip("'")
+    if not value:
+        return ""
+    if value[-1] not in ".!?":
+        value += "."
+    return value
 
 
 def _get_profile(seconds: int) -> dict:
@@ -278,6 +301,16 @@ VISUAL_CONCEPTS = {
     "research": "research laboratory equipment",
     "paper": "research laboratory equipment",
     "study": "research laboratory equipment",
+    "bug": "software testing",
+    "bugs": "software testing",
+    "test": "software testing",
+    "tests": "software testing",
+    "testing": "software testing",
+    "database": "database server room",
+    "query": "database query",
+    "queries": "database query",
+    "pull request": "code review pull request",
+    "pull requests": "code review pull request",
     "climate": "weather monitoring station",
     "city": "city skyline aerial",
     "money": "stock market trading screen",
@@ -312,6 +345,20 @@ QUERY_STOPWORDS = frozenset(
         "real", "actual", "says", "said", "want", "wants", "need", "needs", "work",
         "works", "working", "helped", "help", "helps", "think", "thinks", "believes",
         "proof", "point", "source", "sources", "without",
+        # Abstract verbs/dates make bad stock queries ("must check whether",
+        # "june 2026", "often fails").  Drop them instead of searching them.
+        "must", "whether", "often", "fails", "fail", "reduce", "reduces",
+        "catch", "catches", "juggle", "juggling", "known", "naming", "miss",
+        "misses", "rely", "relies", "check", "checks", "flags", "flag",
+        "creating", "creates", "inefficient", "systemic", "plus",
+        "january", "february", "march", "april", "may", "june", "july",
+        "august", "september", "october", "november", "december",
+        "handle", "handles", "handling", "run", "runs", "running", "spot",
+        "spots", "solve", "solves", "actually", "dedicated", "timeboxed",
+        "anything", "requiring", "require", "requires", "right", "wrong",
+        "tool", "tools", "intent", "inside", "johannes", "millan",
+        "parasuraman", "manzey", "bugs", "developers", "pass", "mechanical",
+        "well", "system",
     }
 )
 
@@ -342,6 +389,15 @@ def _topic_keywords(text: str, limit: int = 3) -> list[str]:
     return out
 
 
+def _bad_query_phrase(text: str) -> bool:
+    """Reject dates and bare numbers; they do not describe a visual subject."""
+    words = re.findall(r"[A-Za-z0-9]+", str(text or "").lower())
+    return any(
+        word.isdigit() or re.fullmatch(r"(?:19|20)\d{2}", word)
+        for word in words
+    )
+
+
 def topic_phrases(text: str, limit: int = 6) -> list[str]:
     """Contiguous meaningful phrases from the topic, two and three words long.
 
@@ -370,7 +426,7 @@ def topic_phrases(text: str, limit: int = 6) -> list[str]:
         for size in (2, 3):
             for index in range(len(run) - size + 1):
                 window = " ".join(run[index:index + size])
-                if window not in windows:
+                if window not in windows and not _bad_query_phrase(window):
                     windows.append(window)
     return windows[:limit]
 
@@ -394,17 +450,43 @@ def build_asset_query(topic: str, label: str = "", text: str = "", variant: int 
     """Build a concrete, searchable visual query for a shot.
 
     Stock search engines return nothing for abstract wording, so the query is a
-    real phrase taken from the subject matter of the script.
+    real phrase taken from the subject matter of the script.  Beat-specific
+    phrases come first so split shots of one long beat do not all search the
+    same generic topic phrase.
     """
-    phrases = topic_phrases(topic)
-    concepts = concepts_for(topic, text)
-    pool = phrases + concepts
+    concepts = list(concepts_for("", text)) + list(concepts_for(topic, text))
+    beat_phrases = topic_phrases(text)
+    topic_phrases_only = topic_phrases(topic)
+    pool: list[str] = []
+    for item in concepts + beat_phrases + topic_phrases_only:
+        if item and item not in pool:
+            pool.append(item)
     if pool:
         return pool[int(variant) % len(pool)]
     keywords = _topic_keywords(topic)
     if keywords:
         return " ".join(keywords[:3])
     return LABEL_CONCEPTS.get(label, "technology laboratory")
+
+
+def shot_query_variants(topic: str, text: str = "", limit: int = 8) -> list[str]:
+    """Ordered search phrases for one beat, most specific first.
+
+    Beat-only concepts come first so a split shot searches what that beat is
+    actually about, not a phrase repeated from the overall topic.
+    """
+    out: list[str] = []
+    for item in (
+        list(concepts_for("", text))
+        + list(concepts_for(topic, text))
+        + list(topic_phrases(text))
+        + list(topic_phrases(topic))
+    ):
+        if item and item not in out:
+            out.append(item)
+        if len(out) >= limit:
+            break
+    return out
 
 
 def build_shot_hint(topic: str, label: str, text: str = "") -> str:
@@ -513,7 +595,7 @@ def plan_shots(beat_sheet: list[dict], *, duration: float, min_shots: int = DEFA
                     source = 'pexels'  # prefer pexels for physical/real-world
                 
                 # Generate asset query
-                variants = topic_phrases(topic) + concepts_for(topic, beat['text'])
+                variants = shot_query_variants(topic, beat['text'])
                 asset_query = build_asset_query(topic, beat.get('label', ''), beat['text'], len(shots))
                 
                 shots.append({
@@ -523,7 +605,9 @@ def plan_shots(beat_sheet: list[dict], *, duration: float, min_shots: int = DEFA
                     'asset_query': asset_query,
                     'asset_query_variants': variants,
                     'source': source,
-                    'caption': beat['text'][:60]
+                    'caption': beat['text'][:60],
+                    'claim': beat['text'],
+                    'beat_label': beat.get('label', '')
                 })
         else:
             visual = beat['shot_hint']
@@ -535,7 +619,7 @@ def plan_shots(beat_sheet: list[dict], *, duration: float, min_shots: int = DEFA
             else:
                 source = 'pexels'
             
-            variants = topic_phrases(topic) + concepts_for(topic, beat['text'])
+            variants = shot_query_variants(topic, beat['text'])
             asset_query = build_asset_query(topic, beat.get('label', ''), beat['text'], len(shots))
             
             shots.append({
@@ -545,7 +629,9 @@ def plan_shots(beat_sheet: list[dict], *, duration: float, min_shots: int = DEFA
                 'asset_query': asset_query,
                 'asset_query_variants': variants,
                 'source': source,
-                'caption': beat['text'][:60]
+                'caption': beat['text'][:60],
+                'claim': beat['text'],
+                'beat_label': beat.get('label', '')
             })
     
     # Ensure minimum shots
@@ -562,8 +648,11 @@ def plan_shots(beat_sheet: list[dict], *, duration: float, min_shots: int = DEFA
             'duration': round(split_dur, 2),
             'visual': longest['visual'] + ' - detail view',
             'asset_query': longest['asset_query'],
+            'asset_query_variants': longest.get('asset_query_variants', []),
             'source': longest['source'],
-            'caption': longest['caption']
+            'caption': longest['caption'],
+            'claim': longest.get('claim', longest['caption']),
+            'beat_label': longest.get('beat_label', '')
         }
         shots[longest_idx]['duration'] = round(split_dur, 2)
         shots.insert(longest_idx + 1, new_shot)
@@ -682,26 +771,22 @@ def critique(script: dict, *, research: dict | None = None, topic: str = "") -> 
                 'detail': f"Banned phrase '{s['phrase']}' found: {s['why']}"
             })
     
-    # Hook not first sentence
-    sentences = _split_sentences(voice_text)
-    if sentences:
-        first_sentence = sentences[0].strip()
-        if hook:
-            # Check if hook is first sentence
-            if hook.strip() != first_sentence and not first_sentence.startswith(hook.strip()):
-                issues.append({
-                    'kind': 'hook_position',
-                    'detail': 'Hook is not the first sentence of voice_text'
-                })
-        else:
-            issues.append({
-                'kind': 'missing_hook',
-                'detail': 'No hook provided'
-            })
-    else:
+    # Hook is a prefix invariant. Avoid naive sentence splitting here: decimals,
+    # initials and abbreviations can create false sentence boundaries.
+    if not voice_text.strip():
         issues.append({
             'kind': 'empty_script',
             'detail': 'Script is empty'
+        })
+    elif not hook or not str(hook).strip():
+        issues.append({
+            'kind': 'missing_hook',
+            'detail': 'No hook provided'
+        })
+    elif not _opening_matches_hook(voice_text, str(hook)):
+        issues.append({
+            'kind': 'hook_position',
+            'detail': 'Hook is not the first spoken sentence of voice_text'
         })
     
     # Generic hook
@@ -955,15 +1040,21 @@ Return ONLY valid JSON with these fields:
             }
         
         voice_text = _normalize_text(parsed.get('voice_text', ''))
-        hook_result = parsed.get('hook', best_hook)
-        # Ensure hook is first sentence
-        if not voice_text.startswith(hook_result):
+        hook_result = _canonical_hook_sentence(str(parsed.get('hook') or best_hook))
+        # Deterministically repair the opening once; never ask the LLM to solve
+        # a formatting invariant. If the first sentence is already the same
+        # hook (punctuation/case aside), replace only that sentence. Otherwise
+        # prepend the selected hook and preserve the original narration intact.
+        if not _opening_matches_hook(voice_text, hook_result):
             sentences = _split_sentences(voice_text)
             if sentences:
-                sentences[0] = hook_result
-                voice_text = '. '.join(sentences)
-                if not voice_text.endswith('.'):
-                    voice_text += '.'
+                first = sentences[0]
+                # Replace the existing first sentence, not prepend to it. This
+                # keeps the narration length stable and avoids duplicating its setup.
+                remainder = voice_text[len(first):].lstrip()
+                voice_text = hook_result + (" " + remainder if remainder else "")
+            else:
+                voice_text = hook_result
         
         word_count_res = _word_count(voice_text)
         critic_res = critique({

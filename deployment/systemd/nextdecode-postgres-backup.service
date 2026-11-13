@@ -1,0 +1,10 @@
+[Unit]
+Description=Verify and back up the NEXTDECODE autonomy PostgreSQL database
+Requires=nextdecode-postgres.service
+After=nextdecode-postgres.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/demon/shorts_studio
+ExecStart=/bin/bash /home/demon/shorts_studio/app/autonomy/backup_postgres.sh
+UMask=0077

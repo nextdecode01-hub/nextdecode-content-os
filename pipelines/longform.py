@@ -23,8 +23,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.script.longform import _visual_query, generate_script
-from video_archive import archive_video
-
+from app.operations.video_archive import archive_video
 load_dotenv(ROOT / ".env", override=True)
 
 PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "").strip()

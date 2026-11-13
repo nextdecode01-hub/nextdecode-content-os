@@ -1,0 +1,14 @@
+[Unit]
+Description=NEXTDECODE recover expired autonomy task leases
+Requires=nextdecode-postgres.service
+After=nextdecode-postgres.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/demon/shorts_studio
+Environment=TZ=Asia/Kolkata
+EnvironmentFile=/home/demon/.config/nextdecode/autonomy-db.env
+ExecStartPre=/home/demon/shorts_studio/venv/bin/python -m app.autonomy.wait_for_postgres
+ExecStart=/home/demon/shorts_studio/venv/bin/python -m app.autonomy.cli recover-expired --limit 100
+UMask=0077
+NoNewPrivileges=true

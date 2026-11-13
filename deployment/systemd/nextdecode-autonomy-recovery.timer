@@ -1,0 +1,12 @@
+[Unit]
+Description=Periodic recovery of expired NEXTDECODE autonomy task leases
+
+[Timer]
+OnBootSec=45s
+OnUnitActiveSec=30s
+AccuracySec=5s
+Unit=nextdecode-autonomy-recovery.service
+Persistent=true
+
+[Install]
+WantedBy=timers.target

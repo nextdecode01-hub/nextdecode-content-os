@@ -31,6 +31,34 @@ ZOOM_PAIRS = ((1.00, 1.14), (1.02, 1.18), (1.00, 1.16), (1.04, 1.12))
 PAN_OFFSETS = ((6.0, 0.0), (-6.0, 3.0), (8.0, -2.0), (-4.0, 4.0))
 DEFAULT_MUSIC_GAIN_DB = -15.0
 
+# Scene-aware motion.  Amplitudes are deliberately small: a 3–8% push keeps the
+# frame alive without cropping the text that the narration is explaining.  The
+# renderer alternates direction so the scale at a cut matches the scale the
+# previous shot ended on (no visible snap between scenes).
+MOTION_PROFILES = {
+    "typography": {"mode": "kenburns", "zoom_pct": 4.0, "pan_pct": 0.0},
+    "chart": {"mode": "kenburns", "zoom_pct": 3.5, "pan_pct": 0.3},
+    "ui_demo": {"mode": "kenburns", "zoom_pct": 5.0, "pan_pct": 0.5},
+    "diagram": {"mode": "kenburns", "zoom_pct": 6.0, "pan_pct": 0.8},
+    "map": {"mode": "kenburns", "zoom_pct": 6.0, "pan_pct": 1.0},
+    "product": {"mode": "kenburns", "zoom_pct": 7.0, "pan_pct": 0.8},
+}
+PHOTO_PROFILE = {"mode": "kenburns", "zoom_pct": 8.0, "pan_pct": 1.2}
+NATIVE_VIDEO_PROFILE = {"mode": "native", "zoom_pct": 0.0, "pan_pct": 0.0}
+NATIVE_VIDEO_MAX_SCALE = 1.08
+VIDEO_SUFFIXES = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
+IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+
+
+def sfx_enabled() -> bool:
+    """Per-cut transition SFX are opt-in only.
+
+    Phase 6 added a whoosh to every cut.  That is an intentional sound effect,
+    not a render artefact, but it reads as an unwanted extra sound.  Keep the
+    synthesis path available behind ``SHOT_SFX=on`` and default to silence.
+    """
+    return os.getenv("SHOT_SFX", "").strip().lower() in {"1", "true", "yes", "on"}
+
 _DEMO_VIDEO_PATH = os.getenv("DEMO_VIDEO_PATH", "").strip()
 
 _AI_IMAGE_ENV_KEYS = ("GEMINI_API_KEY", "FAL_KEY", "REPLICATE_API_TOKEN", "OPENAI_API_KEY")
@@ -45,7 +73,8 @@ def _beat_text(beat) -> str:
     if isinstance(beat, str):
         return beat
     if isinstance(beat, dict):
-        return beat.get("text") or beat.get("visual") or beat.get("caption") or str(beat)
+        return (beat.get("text") or beat.get("caption") or beat.get("claim")
+                or beat.get("visual") or str(beat))
     return str(beat)
 
 
@@ -128,6 +157,8 @@ def _pick_source(index: int, beat_text: str) -> str:
 
 
 def _pick_sfx(index: int, text: str, total: int) -> str:
+    if not sfx_enabled():
+        return "none"
     if _has_keyword(text, HOOK_KEYWORDS) or index == 0:
         return "impact"
     if _has_keyword(text, PAYOFF_KEYWORDS):
@@ -135,6 +166,125 @@ def _pick_sfx(index: int, text: str, total: int) -> str:
     if index > 0:
         return "whoosh"
     return "none"
+
+
+def _clamp(value: float, low: float, high: float) -> float:
+    return max(low, min(high, float(value)))
+
+
+def _asset_kind(detail: dict | None) -> str:
+    provider = str((detail or {}).get("provider") or "")
+    if provider in {"gradient", "procedural"}:
+        return "procedural"
+    path = str((detail or {}).get("path") or "").lower()
+    suffix = Path(path).suffix if path else ""
+    if suffix in VIDEO_SUFFIXES:
+        return "video"
+    if suffix in IMAGE_SUFFIXES:
+        return "image"
+    return "procedural"
+
+
+def _motion_profile(scene_type: str, asset_kind: str,
+                    provider: str = "") -> tuple[str, dict]:
+    if provider == "gradient":
+        # The fallback is a text card rendered to video; keep the text still.
+        return "gradient_text_card", MOTION_PROFILES["typography"]
+    if scene_type == "footage":
+        if asset_kind == "video":
+            return "native_footage", NATIVE_VIDEO_PROFILE
+        return "photo_kenburns", PHOTO_PROFILE
+    if scene_type in MOTION_PROFILES:
+        return f"{scene_type}_kenburns", MOTION_PROFILES[scene_type]
+    return "photo_kenburns", PHOTO_PROFILE
+
+
+def assign_motion(shots: list[dict], details: list[dict] | None = None, *,
+                  width: int = 1080) -> list[dict]:
+    """Attach a scene-aware, continuous motion plan to already-resolved shots.
+
+    Must run after assets are resolved (it needs the asset kind and scene type)
+    and before rendering.  The first zoom of every shot equals the last zoom of
+    the previous shot, so cuts do not visibly jump in scale.  Real video uses a
+    fixed crop and keeps its native motion; stills use an eased Ken Burns move.
+    """
+    details = details or []
+    previous_end_zoom: float | None = None
+    previous_end_pan = (0.0, 0.0)
+    motions: list[dict] = []
+    for position, shot in enumerate(shots):
+        detail = details[position] if position < len(details) else {}
+        scene_type = str((detail or {}).get("scene_type") or shot.get("scene_type") or "footage")
+        asset_kind = _asset_kind(detail)
+        profile_name, profile = _motion_profile(
+            scene_type, asset_kind, str((detail or {}).get("provider") or "")
+        )
+        duration = max(0.1, float(shot.get("duration") or 3.0))
+        frames = max(1, int(round(duration * 30)))
+
+        if profile["mode"] == "native":
+            scale = _clamp(previous_end_zoom or 1.0, 1.0, NATIVE_VIDEO_MAX_SCALE)
+            z0 = z1 = round(scale, 3)
+            pan0 = pan1 = (0.0, 0.0)
+        else:
+            low = 1.0
+            high = round(1.0 + float(profile["zoom_pct"]) / 100.0, 3)
+            if previous_end_zoom is None:
+                z0, z1 = low, high
+            else:
+                z0 = round(_clamp(previous_end_zoom, low, high), 3)
+                if abs(z0 - high) <= 1e-3:
+                    z1 = low
+                elif abs(z0 - low) <= 1e-3:
+                    z1 = high
+                else:
+                    z1 = low if z0 >= (low + high) / 2.0 else high
+            amplitude = float(width) * float(profile["pan_pct"]) / 100.0
+            if amplitude <= 0.5:
+                pan0 = pan1 = (0.0, 0.0)
+            else:
+                px0 = _clamp(previous_end_pan[0], -amplitude, amplitude)
+                py0 = _clamp(previous_end_pan[1], -amplitude / 2.0, amplitude / 2.0)
+                px1 = -amplitude if px0 >= 0 else amplitude
+                py1 = -amplitude / 2.0 if py0 >= 0 else amplitude / 2.0
+                pan0 = (round(px0, 1), round(py0, 1))
+                pan1 = (round(px1, 1), round(py1, 1))
+
+        motion = {
+            "profile": profile_name,
+            "mode": profile["mode"],
+            "scene_type": scene_type,
+            "asset_kind": asset_kind,
+            "zoom_from": z0,
+            "zoom_to": z1,
+            "pan": {"x0": pan0[0], "y0": pan0[1], "x1": pan1[0], "y1": pan1[1]},
+            "ease": "smoothstep",
+            "duration": round(duration, 3),
+            "frames": frames,
+        }
+        shot["motion"] = motion
+        # Keep the legacy keys meaningful for existing consumers/metadata.
+        shot["scene_type"] = scene_type
+        shot["zoom_from"] = z0
+        shot["zoom_to"] = z1
+        shot["pan"] = {
+            "x": pan0[0], "y": pan0[1],
+            "x0": pan0[0], "y0": pan0[1], "x1": pan1[0], "y1": pan1[1],
+        }
+        previous_end_zoom = z1
+        previous_end_pan = pan1
+        motions.append({
+            "index": int(shot.get("index", position) or 0),
+            "scene_type": scene_type,
+            "asset_kind": asset_kind,
+            "profile": profile_name,
+            "mode": profile["mode"],
+            "zoom_from": z0,
+            "zoom_to": z1,
+            "pan": dict(motion["pan"]),
+            "duration": round(duration, 3),
+        })
+    return motions
 
 
 def plan_shots(script: dict, *, audio_duration: float | None = None) -> list[dict]:
@@ -169,6 +319,9 @@ def plan_shots(script: dict, *, audio_duration: float | None = None) -> list[dic
         duration = DEFAULT_DURATION
 
     count = max(MIN_SHOTS, math.ceil(duration / MAX_SHOT_DURATION))
+    if len(beats) >= MIN_SHOTS:
+        # Prefer one shot per beat: cycling the beat list repeats visuals.
+        count = len(beats)
     seg = duration / count
     while seg < MIN_SHOT_DURATION and count > MIN_SHOTS:
         count -= 1
@@ -177,9 +330,27 @@ def plan_shots(script: dict, *, audio_duration: float | None = None) -> list[dic
 
     shots: list[dict] = []
     topic = str(script.get("topic") or script.get("title") or "short").strip()
+    previous_query = ""
     for i, (start, end) in enumerate(slots):
         beat = beats[i % len(beats)]
         text = _beat_text(beat)
+        caption_text = text
+        claim = ""
+        beat_label = ""
+        if isinstance(beat, dict):
+            caption_text = str(beat.get("caption") or text)
+            claim = str(beat.get("claim") or beat.get("text") or "")
+            beat_label = str(beat.get("label") or beat.get("beat_label") or "")
+        query = _visual_query(beat, i) or f"{topic} shot {i + 1}"
+        variants = _query_variants(beat)
+        if query.lower() == previous_query:
+            alternative = next(
+                (item for item in variants if item.lower() != previous_query),
+                "",
+            )
+            if alternative:
+                query = alternative
+        previous_query = query.lower()
         z_from, z_to = ZOOM_PAIRS[i % len(ZOOM_PAIRS)]
         px, py = PAN_OFFSETS[i % len(PAN_OFFSETS)]
         gain = round(DEFAULT_MUSIC_GAIN_DB - 0.5 * (i % 4), 2)
@@ -190,10 +361,12 @@ def plan_shots(script: dict, *, audio_duration: float | None = None) -> list[dic
             "end": round(end, 3),
             "duration": round(end - start, 3),
             "visual": text,
-            "asset_query": _visual_query(beat, i) or f"{topic} shot {i + 1}",
-            "asset_query_variants": _query_variants(beat),
+            "claim": claim or text,
+            "beat_label": beat_label,
+            "asset_query": query,
+            "asset_query_variants": variants,
             "source": _pick_source(i, text),
-            "caption": _truncate(text, 42) or f"{topic} part {i + 1}",
+            "caption": _truncate(caption_text, 42) or f"{topic} part {i + 1}",
             "zoom_from": z_from,
             "zoom_to": z_to,
             "pan": {"x": px, "y": py},
@@ -212,6 +385,8 @@ def _single_shot(index: int, start: float, end: float, script: dict) -> dict:
         "end": round(end, 3),
         "duration": round(end - start, 3),
         "visual": text,
+        "claim": text,
+        "beat_label": "",
         "asset_query": text,
         "source": "demo" if (_DEMO_VIDEO_PATH and Path(_DEMO_VIDEO_PATH).is_file()) else "procedural",
         "caption": _truncate(text, 42),

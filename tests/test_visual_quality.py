@@ -6,10 +6,10 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import approve_longform
-import approve_review
-from approval_integrity import sha256_file
-from visual_quality import has_publishable_visuals
+from app.review import approve_longform as approve_longform
+from app.review import approve_review as approve_review
+from app.security.approval_integrity import sha256_file
+from app.visuals.visual_quality import has_publishable_visuals
 
 
 class VisualQualityTests(unittest.TestCase):

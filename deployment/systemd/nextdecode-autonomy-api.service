@@ -1,0 +1,24 @@
+[Unit]
+Description=NEXTDECODE local autonomy API
+Requires=nextdecode-postgres.service
+After=nextdecode-postgres.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/demon/shorts_studio
+Environment=TZ=Asia/Kolkata
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=/home/demon/.config/nextdecode/api.env
+EnvironmentFile=/home/demon/.config/nextdecode/autonomy-db.env
+ExecStartPre=/home/demon/shorts_studio/venv/bin/python -m app.autonomy.wait_for_postgres
+ExecStart=/home/demon/shorts_studio/venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 8765
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=45
+TimeoutStopSec=20
+KillSignal=SIGINT
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

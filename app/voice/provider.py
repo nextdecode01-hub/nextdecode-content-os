@@ -67,7 +67,9 @@ PROVIDER_ALIASES = {
     "fallback": "silent",
 }
 
-DEFAULT_VOICE = "en-US-ChristopherNeural"
+# Approved in Phase 9 after the Phase 8 A/B listening test: Andrew Multilingual is
+# the production narration voice.  TTS_VOICE still overrides this.
+DEFAULT_VOICE = "en-US-AndrewMultilingualNeural"
 DEFAULT_ELEVENLABS_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"
 DEFAULT_ELEVENLABS_MODEL = "eleven_flash_v2_5"
 DEFAULT_CARTESIA_MODEL = "sonic-3"
@@ -87,6 +89,14 @@ FFMPEG_TIMEOUT = 300
 CONCAT_TIMEOUT = 600
 CHUNK_SIZE = 1800
 ELEVENLABS_MAX_CHARS = 5000
+
+# Edge TTS exposes only these three prosody controls.  Defaults are neutral so
+# existing renders do not change unless TTS_RATE/TTS_PITCH/TTS_VOLUME is set.
+DEFAULT_EDGE_RATE = "+0%"
+DEFAULT_EDGE_PITCH = "+0Hz"
+DEFAULT_EDGE_VOLUME = "+0%"
+_RATE_RE = re.compile(r"^[+-]?\d+(?:\.\d+)?%$")
+_PITCH_RE = re.compile(r"^[+-]?\d+(?:\.\d+)?Hz$")
 
 TEST_SENTENCE = (
     "Nextdecode voice provider chain test. If you can hear this sentence, "
@@ -123,6 +133,28 @@ def _normalize_provider(name: str | None) -> str | None:
     if underscored in PROVIDER_ALIASES:
         return PROVIDER_ALIASES[underscored]
     return None
+
+
+def _edge_prosody(rate: str | None = None, pitch: str | None = None,
+                  volume: str | None = None) -> dict[str, str]:
+    """Resolve and validate conservative Edge prosody values.
+
+    Explicit arguments win over ``TTS_RATE``/``TTS_PITCH``/``TTS_VOLUME``.
+    Invalid values fall back to neutral instead of failing the provider chain.
+    """
+    def pick(explicit: str | None, env_name: str, default: str,
+             pattern: re.Pattern[str]) -> str:
+        value = str(explicit if explicit not in (None, "") else (_env(env_name) or default)).strip()
+        if pattern.fullmatch(value):
+            return value
+        print(f"[tts] invalid {env_name or 'prosody value'} {value!r}; using {default}")
+        return default
+
+    return {
+        "rate": pick(rate, "TTS_RATE", DEFAULT_EDGE_RATE, _RATE_RE),
+        "pitch": pick(pitch, "TTS_PITCH", DEFAULT_EDGE_PITCH, _PITCH_RE),
+        "volume": pick(volume, "TTS_VOLUME", DEFAULT_EDGE_VOLUME, _RATE_RE),
+    }
 
 
 def _find_edge_tts() -> str | None:
@@ -247,6 +279,10 @@ def list_providers() -> None:
     print(f"Configured now: {', '.join(available_providers()) or 'none'}")
     print(f"Default provider: {default_provider}")
     print("Voice: " + (_env("TTS_VOICE") or DEFAULT_VOICE))
+    prosody = _edge_prosody()
+    print(
+        "Edge prosody: rate {rate}, pitch {pitch}, volume {volume}".format(**prosody)
+    )
     print("Set a key with:  echo 'ELEVENLABS_API_KEY=sk_xxx' >> .env")
 
 
@@ -291,6 +327,112 @@ def probe_duration(path: str | Path) -> float | None:
         return round(float(lines[0]), 3)
     except (TypeError, ValueError):
         return None
+
+
+def probe_audio_format(path: str | Path) -> dict:
+    """Return ``{codec, sample_rate, channels, bit_rate}`` for an audio file."""
+    ffprobe = _find_ffprobe()
+    target = Path(path)
+    if not ffprobe or not target.exists():
+        return {}
+    try:
+        completed = subprocess.run(
+            [
+                ffprobe, "-v", "error",
+                "-select_streams", "a:0",
+                "-show_entries", "stream=codec_name,sample_rate,channels,bit_rate",
+                "-of", "default=nw=1:nk=1",
+                str(target),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    values = [line.strip() for line in (completed.stdout or "").splitlines() if line.strip()]
+    keys = ("codec", "sample_rate", "channels", "bit_rate")
+    info: dict[str, object] = {}
+    for key, value in zip(keys, values):
+        if not key.startswith("bit"):
+            info[key] = value
+        else:
+            try:
+                info[key] = int(value)
+            except (TypeError, ValueError):
+                info[key] = None
+    return info
+
+
+# ---------------------------------------------------------------------------
+# Lossless master handling
+# ---------------------------------------------------------------------------
+MASTER_SAMPLE_RATE = 44100
+MASTER_BITRATE = "320k"
+
+
+def to_wav_master(src: str | Path, dst: str | Path | None = None) -> Path | None:
+    """Decode a provider file once into a 44.1 kHz mono 24-bit WAV master.
+
+    The narration is the asset every later stage reads, so it is decoded a single
+    time and then handled losslessly.  Mixing from this WAV instead of the
+    provider mp3 avoids a second lossy generation on the way to the video.
+    """
+    ffmpeg = _find_ffmpeg()
+    source = Path(src)
+    if not ffmpeg or not source.exists():
+        return None
+    target = Path(dst) if dst else source.with_suffix(".wav")
+    command = [
+        ffmpeg, "-y", "-v", "error",
+        "-i", str(source),
+        "-vn",
+        "-ac", "1",
+        "-ar", str(MASTER_SAMPLE_RATE),
+        "-c:a", "pcm_s24le",
+        str(target),
+    ]
+    try:
+        completed = subprocess.run(command, capture_output=True, text=True, timeout=FFMPEG_TIMEOUT)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0 or not target.exists() or target.stat().st_size == 0:
+        return None
+    return target
+
+
+def export_master_mp3(src: str | Path, dst: str | Path,
+                      bitrate: str = MASTER_BITRATE,
+                      audio_filter: str | None = None) -> Path | None:
+    """Write the narration deliverable as constant-bitrate mp3 from the master.
+
+    ``-b:a`` sets the requested CBR; it cannot add information the provider did
+    not render, it only prevents another lossy round-trip from hiding what is
+    already there.  Pass the same loudness filter the video mix uses so the
+    standalone file matches what the render sounds like.
+    """
+    ffmpeg = _find_ffmpeg()
+    source = Path(src)
+    if not ffmpeg or not source.exists():
+        return None
+    target = Path(dst)
+    command = [
+        ffmpeg, "-y", "-v", "error",
+        "-i", str(source),
+        "-vn",
+        "-ac", "1",
+        "-ar", str(MASTER_SAMPLE_RATE),
+    ]
+    if audio_filter:
+        command += ["-af", str(audio_filter)]
+    command += ["-c:a", "libmp3lame", "-b:a", str(bitrate), str(target)]
+    try:
+        completed = subprocess.run(command, capture_output=True, text=True, timeout=FFMPEG_TIMEOUT)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0 or not target.exists() or target.stat().st_size == 0:
+        return None
+    return target
 
 
 # ---------------------------------------------------------------------------
@@ -349,14 +491,25 @@ def chunk_text(text: str, max_chars: int = CHUNK_SIZE) -> list[str]:
 # ---------------------------------------------------------------------------
 # Provider implementations - each one raises on failure
 # ---------------------------------------------------------------------------
-def _synthesize_edge_tts(text: str, out_path: Path, voice: str | None = None, model: str | None = None) -> None:
+def _synthesize_edge_tts(text: str, out_path: Path, voice: str | None = None,
+                         model: str | None = None, rate: str | None = None,
+                         pitch: str | None = None, volume: str | None = None) -> None:
     """Render speech with the local edge-tts CLI (free, no key required)."""
     binary = _find_edge_tts()
     if not binary:
         raise RuntimeError("edge-tts CLI not found - run './venv/bin/pip install edge-tts'")
     voice_id = voice or _env("TTS_VOICE") or DEFAULT_VOICE
+    prosody = _edge_prosody(rate, pitch, volume)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    command = [binary, "--voice", voice_id, "--text", text, "--write-media", str(out_path)]
+    command = [
+        binary,
+        "--voice", voice_id,
+        "--rate", prosody["rate"],
+        "--pitch", prosody["pitch"],
+        "--volume", prosody["volume"],
+        "--text", text,
+        "--write-media", str(out_path),
+    ]
     completed = subprocess.run(
         command,
         capture_output=True,
@@ -529,6 +682,9 @@ def synthesize(
     provider: str | None = None,
     voice: str | None = None,
     model: str | None = None,
+    rate: str | None = None,
+    pitch: str | None = None,
+    volume: str | None = None,
 ) -> dict:
     """Synthesize ``text`` with exactly one provider.
 
@@ -555,7 +711,13 @@ def synthesize(
         return _result(None, name, "Refusing to synthesize empty text.", hint)
 
     try:
-        _SYNTHESIZERS[name](text, target, voice=voice, model=model)
+        if name == "edge_tts":
+            _SYNTHESIZERS[name](
+                text, target, voice=voice, model=model,
+                rate=rate, pitch=pitch, volume=volume,
+            )
+        else:
+            _SYNTHESIZERS[name](text, target, voice=voice, model=model)
     except Exception as exc:  # noqa: BLE001 - the chain must never break
         error = f"{type(exc).__name__}: {exc}"
         try:
@@ -573,6 +735,10 @@ def synthesize_with_fallback(
     out_path: str | Path,
     *,
     preferred: str | None = None,
+    voice: str | None = None,
+    rate: str | None = None,
+    pitch: str | None = None,
+    volume: str | None = None,
 ) -> dict:
     """Walk the provider chain until one succeeds.  Never raises."""
     target = Path(out_path)
@@ -582,7 +748,14 @@ def synthesize_with_fallback(
     last_provider = chain[-1] if chain else "none"
 
     for name in chain:
-        result = synthesize(text, target, provider=name)
+        if name == "edge_tts":
+            result = synthesize(
+                text, target, provider=name, voice=voice,
+                rate=rate, pitch=pitch, volume=volume,
+            )
+        else:
+            # A Microsoft voice id is not valid for the hosted providers.
+            result = synthesize(text, target, provider=name)
         if result.get("path"):
             result["chain"] = chain
             return result
@@ -643,6 +816,10 @@ def synthesize_long(
     out_path: str | Path,
     *,
     preferred: str | None = None,
+    voice: str | None = None,
+    rate: str | None = None,
+    pitch: str | None = None,
+    volume: str | None = None,
 ) -> dict:
     """Synthesize a long script chunk by chunk and concatenate into one mp3."""
     target = Path(out_path)
@@ -660,7 +837,10 @@ def synthesize_long(
     try:
         for index, chunk in enumerate(chunks):
             chunk_path = workdir / f"chunk_{index:04d}.mp3"
-            result = synthesize_with_fallback(chunk, chunk_path, preferred=preferred)
+            result = synthesize_with_fallback(
+                chunk, chunk_path, preferred=preferred, voice=voice,
+                rate=rate, pitch=pitch, volume=volume,
+            )
             if not result.get("path"):
                 warnings.append(f"chunk {index + 1}/{len(chunks)} failed: {result.get('error')}")
                 continue
@@ -716,7 +896,12 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--provider", help="Force one provider instead of walking the chain")
     parser.add_argument("--voice", help="Override the voice / voice id")
     parser.add_argument("--model", help="Override the model")
+    parser.add_argument("--rate", help="Edge TTS rate, e.g. -4%%")
+    parser.add_argument("--pitch", help="Edge TTS pitch, e.g. +0Hz")
+    parser.add_argument("--volume", help="Edge TTS volume, e.g. +0%%")
     parser.add_argument("--long", action="store_true", help="Use chunked long-form synthesis")
+    parser.add_argument("--master", action="store_true",
+                        help="Also write a lossless WAV master and a 320 kbps CBR mp3 deliverable")
     return parser
 
 
@@ -732,6 +917,10 @@ def _print_result(result: dict) -> None:
         print(f"[+] Size     : {media.stat().st_size if media.exists() else 0} bytes")
         probed = probe_duration(result["path"])
         print(f"[+] Duration : {probed if probed is not None else 'unknown'}s (estimated {result.get('duration_hint')}s)")
+        info = probe_audio_format(result["path"])
+        if info:
+            print(f"[+] Source   : {info.get('codec')} {info.get('sample_rate')} Hz "
+                  f"{info.get('channels')} ch {info.get('bit_rate') or 0} bps")
         if result.get("chunks"):
             print(f"[+] Chunks   : {result.get('rendered_chunks')}/{result.get('chunks')} rendered")
     else:
@@ -761,13 +950,28 @@ def main() -> int:
     out_path = Path(args.out) if args.out else ROOT / "outputs" / "tts_output.mp3"
 
     if args.long:
-        result = synthesize_long(text, out_path, preferred=args.provider)
+        result = synthesize_long(
+            text, out_path, preferred=args.provider, voice=args.voice,
+            rate=args.rate, pitch=args.pitch, volume=args.volume,
+        )
     elif args.provider:
-        result = synthesize(text, out_path, provider=args.provider, voice=args.voice, model=args.model)
+        result = synthesize(
+            text, out_path, provider=args.provider, voice=args.voice,
+            model=args.model, rate=args.rate, pitch=args.pitch, volume=args.volume,
+        )
     else:
-        result = synthesize_with_fallback(text, out_path, preferred=args.provider)
+        result = synthesize_with_fallback(
+            text, out_path, preferred=args.provider, voice=args.voice,
+            rate=args.rate, pitch=args.pitch, volume=args.volume,
+        )
 
     _print_result(result)
+    if args.master and result.get("path"):
+        source = Path(result["path"])
+        wav = to_wav_master(source, source.with_suffix(".wav"))
+        mp3 = export_master_mp3(wav or source, source.with_name(f"{source.stem}_320k.mp3"))
+        print(f"[+] Master   : {wav or '(failed)'}")
+        print(f"[+] 320k mp3 : {mp3 or '(failed)'}")
     if args.test:
         print("[+] " + ("TEST PASSED" if result.get("path") else "TEST FAILED"))
     return 0 if result.get("path") else 1

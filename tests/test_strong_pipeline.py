@@ -8,10 +8,10 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import model_health
-import motion_director
+from app.providers import model_health as model_health
+from app.visuals import motion_director as motion_director
 from app.script import studio as script_studio
-import stock_fetcher
+from app.visuals import stock_fetcher as stock_fetcher
 from app.script import pipeline as strong_pipeline
 
 

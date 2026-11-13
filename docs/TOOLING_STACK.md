@@ -6,9 +6,15 @@
 - Free tier: yes (Gemini, Groq, Ollama)
 
 ## Voice / TTS
-- Module: voice_provider.py (edge_tts -> elevenlabs -> cartesia -> openai -> silent)
-- Keys: TTS_PROVIDER, TTS_VOICE, ELEVENLABS_API_KEY, CARTESIA_API_KEY, OPENAI_API_KEY
+- Module: app/voice/provider.py (edge_tts -> elevenlabs -> cartesia -> openai -> silent)
+- Default voice: en-US-AndrewMultilingualNeural (Phase 9 approval); source is 24 kHz / 48 kbps mono mp3
+- Keys: TTS_PROVIDER, TTS_VOICE, TTS_RATE, TTS_PITCH, TTS_VOLUME, TTS_TEXT_PREP, ELEVENLABS_API_KEY, CARTESIA_API_KEY, OPENAI_API_KEY
 - Free tier: yes (edge-tts)
+
+## Audio mix / delivery
+- Module: app/render/ffmpeg_tools.py
+- Keys: AUDIO_BITRATE (default 320k), MUSIC_BED (on/off, default off), MUSIC_BED_FILE (licensed track), SHOT_SFX (default off)
+- Chain: 44.1 kHz mono 24-bit WAV master -> measured linear loudnorm (I=-16 TP=-1.5) -> optional 3:1 duck -> limiter (level=false, -1.5 dBFS)
 
 ## Visuals / Images
 - Module: visual_assets.py (gemini -> fal -> replicate -> openai -> local ffmpeg)
@@ -39,11 +45,12 @@
 - Keys: GA4_*, YT_ANALYTICS_ENABLED, META_INSIGHTS_ENABLED
 - Limitation: YouTube Analytics needs yt-analytics.readonly OAuth scope (403 without it)
 
-## Scheduling / Orchestration
-- n8n workflow K5Qcx4jH8xw4qc9F "Approved Shorts & Long-Form Studio" active; crons 0 12 * * * and 0 20 * * * Asia/Kolkata
-- URL: http://localhost:5678/workflow/K5Qcx4jH8xw4qc9F
-- Old id aibl9NX61mKH9z5m lost when n8n DB wiped; restore_n8n_workflow.sh re-imports idempotently.
-- Limitation: n8n public API rejects settings.callerPolicy; restored workflow runs with timezone+executionOrder only.
+## Autonomous task execution — 2026-11-07
+
+- Application-owned runtime: `app.autonomy` (versioned contracts, explicit capability registry, SQLite WAL queue, leases, retries, idempotency and append-only task events).
+- No external workflow server is required for the core task lifecycle. Local worker command: `python -m app.autonomy.cli worker`.
+- Capability execution is allow-listed; task payloads cannot supply shell commands. External publishing remains blocked by default.
+- Additional browser, coding, research, document and media specialists will be added only after free/licence/resource/quality qualification.
 
 ## Free-tier recommended stack
 Gemini + edge-tts + ffmpeg + YouTube Data API + Reddit + Cloudinary free tier + local sqlite.

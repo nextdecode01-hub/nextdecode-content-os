@@ -4,7 +4,7 @@ from unittest.mock import patch
 from api import main as api_main
 from app.research import desk
 from app.research import topics
-import visual_assets
+from app.visuals import visual_assets as visual_assets
 
 
 class FakeResponse:
@@ -89,8 +89,12 @@ class DeskSourceTests(unittest.TestCase):
         with patch.object(desk.requests, "get", return_value=FakeResponse("blocked", status_code=403)):
             result = desk.fetch_url("https://example.com/blocked")
 
+        # Phase 10.1: a refusal is retried once with document content negotiation
+        # and then reported for manual review instead of being silently dropped.
         self.assertFalse(result["ok"])
-        self.assertEqual(result["error"], "HTTP 403")
+        self.assertTrue(result["error"].startswith("HTTP 403"))
+        self.assertTrue(result["manual_review_required"])
+        self.assertEqual(result["text"], "")
 
     def test_fetch_url_rejects_non_text_payloads(self):
         with patch.object(desk.requests, "get", return_value=FakeResponse("%PDF", content_type="application/pdf")):

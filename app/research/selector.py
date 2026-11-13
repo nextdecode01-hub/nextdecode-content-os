@@ -259,6 +259,31 @@ def _host(url: str) -> str:
     return match.group(1).removeprefix("www.") if match else ""
 
 
+# Wikipedia arrives through default sources, aggregators and cached feed snapshots.
+# It is an aggregated tertiary source, so the research-source policy excludes it from
+# topic discovery; the filter keys on both the source label and the URL host.
+WIKIPEDIA_SOURCE_LABELS = frozenset({"wikipedia", "wiki", "wikipedia trending"})
+WIKIPEDIA_HOST_SUFFIXES = ("wikipedia.org", "wikimedia.org")
+
+
+def is_discovery_excluded(candidate: Any) -> bool:
+    """True when a discovery candidate is a Wikipedia/Wikimedia source."""
+    if not isinstance(candidate, dict):
+        return False
+    source = str(candidate.get("source") or "").strip().lower()
+    if source in WIKIPEDIA_SOURCE_LABELS:
+        return True
+    for key in ("url", "source_url", "link"):
+        host = _host(candidate.get(key) or "")
+        if any(host == suffix or host.endswith("." + suffix) for suffix in WIKIPEDIA_HOST_SUFFIXES):
+            return True
+    platforms = candidate.get("platforms")
+    if isinstance(platforms, (list, tuple)) and any(
+            str(item).strip().lower() in WIKIPEDIA_SOURCE_LABELS for item in platforms):
+        return True
+    return False
+
+
 def _dimension(score: float, why: str, score_type: str, basis: str, **extra: Any) -> dict:
     payload = {
         "score": int(round(_clamp(score))),
@@ -346,8 +371,7 @@ def derive_past_performance() -> dict:
 
     history: list[dict] = []
     try:
-        from analytics_collect import get_history  # type: ignore
-
+        from app.operations.analytics_collect import get_history
         history = list(get_history(days=90) or [])
         result["analytics_records"] = len(history)
     except Exception:
@@ -550,8 +574,7 @@ def _candidate_payloads(candidates: list[dict]) -> list[dict]:
 
 
 def _generate_json(prompt: str, timeout: int = 240) -> dict:
-    import multi_model_ai
-
+    from app.providers import multi_model_ai
     return multi_model_ai.generate_json(prompt, temperature=0.3, timeout=timeout)
 
 
@@ -839,7 +862,7 @@ def _image_provider_available() -> bool:
     if not _env("GEMINI_API_KEY"):
         return False
     try:
-        import visual_assets  # type: ignore
+        from app.visuals import visual_assets  # type: ignore
 
         providers = visual_assets.available_providers()
         return any(name in ("gemini", "fal", "replicate", "openai") for name in providers)
@@ -1578,6 +1601,12 @@ def rank_topics(candidates: list, *, weights: dict | None = None,
                 past_performance: dict | None = None) -> list[dict]:
     """Score every candidate and return them sorted best first."""
     items = [item for item in (candidates or []) if isinstance(item, dict)]
+    kept = [item for item in items if not is_discovery_excluded(item)]
+    dropped = len(items) - len(kept)
+    if dropped:
+        print(f"[selector] dropped {dropped} Wikipedia/Wikimedia discovery candidate(s) "
+              "under the research-source policy")
+    items = kept
     if not items:
         return []
     resolved_weights = resolve_weights(weights)

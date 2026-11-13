@@ -12,7 +12,10 @@ from pathlib import Path
 import requests
 from dotenv import load_dotenv
 
-ROOT = Path(__file__).resolve().parent
+from app.publish.authorization import PublishNotAuthorized, authorize_publish, authorization_error, verify_protected_action_decision
+from app.publish.artifact_snapshot import ArtifactIntegrityError, upload_snapshot
+
+ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(ROOT / ".env", override=True)
 VIDEO = ROOT / "outputs" / "output_short.mp4"
 METADATA = ROOT / "data" / "metadata.json"
@@ -60,7 +63,7 @@ def save_ledger(value: dict) -> None:
     os.replace(temporary, LEDGER)
 
 
-def publish() -> dict:
+def publish(*, dry_run: bool = False) -> dict:
     graph_version = require_env("META_GRAPH_API_VERSION")
     page_id = require_env("FACEBOOK_PAGE_ID")
     page_token = require_env("FACEBOOK_PAGE_ACCESS_TOKEN")
@@ -82,6 +85,13 @@ def publish() -> dict:
         description += "\n\nSources: " + " ".join(str(url) for url in sources[:5])
     description = description[:5000]
 
+    decision = authorize_publish(platform="facebook", purpose="short", data_root=ROOT,
+                                 metadata_file=METADATA, video_file=VIDEO)
+    if dry_run:
+        print(json.dumps({"status": "dry_run", "uploaded": False, "platform": "facebook",
+                          "title": title}))
+        return {"status": "dry_run"}
+
     fingerprint = f"{page_id}:{content_fingerprint(metadata)}"
     ledger = read_ledger()
     if fingerprint in ledger["facebook"]:
@@ -89,53 +99,57 @@ def publish() -> dict:
         print(json.dumps({"status": "skipped_duplicate", "video_id": previous.get("video_id", "")}))
         return {"status": "skipped_duplicate"}
 
-    base = f"https://graph.facebook.com/{graph_version}"
-    session = api_json(requests.post(
-        f"{base}/{page_id}/video_reels",
-        params={"upload_phase": "start"},
-        headers={"Authorization": f"Bearer {page_token}"},
-        timeout=30,
-    ))
-    video_id = session.get("video_id")
-    upload_url = session.get("upload_url")
-    if not video_id or not upload_url:
-        raise RuntimeError("Meta did not return a Reel upload session.")
+    # ND-M3-F1: bind the authorized digest to the exact bytes transferred; the
+    # Meta session and the byte stream both use the snapshot, never the live path.
+    verify_protected_action_decision(decision, platform="facebook", purpose="short")
+    with upload_snapshot(VIDEO, decision["video_sha256"], root=ROOT) as snapshot:
+        base = f"https://graph.facebook.com/{graph_version}"
+        session = api_json(requests.post(
+            f"{base}/{page_id}/video_reels",
+            params={"upload_phase": "start"},
+            headers={"Authorization": f"Bearer {page_token}"},
+            timeout=30,
+        ))
+        video_id = session.get("video_id")
+        upload_url = session.get("upload_url")
+        if not video_id or not upload_url:
+            raise RuntimeError("Meta did not return a Reel upload session.")
 
-    size = VIDEO.stat().st_size
-    with VIDEO.open("rb") as stream:
-        uploaded = requests.post(
-            upload_url,
-            data=stream,
-            headers={
-                "Authorization": f"OAuth {page_token}",
-                "offset": "0",
-                "file_size": str(size),
-                "Content-Type": "application/octet-stream",
+        size = snapshot.size
+        with snapshot.path.open("rb") as stream:
+            uploaded = requests.post(
+                upload_url,
+                data=stream,
+                headers={
+                    "Authorization": f"OAuth {page_token}",
+                    "offset": "0",
+                    "file_size": str(size),
+                    "Content-Type": "application/octet-stream",
+                },
+                timeout=(30, 600),
+            )
+        try:
+            upload_result = uploaded.json()
+        except ValueError:
+            upload_result = {}
+        if not uploaded.ok or upload_result.get("success") is not True:
+            api_json(uploaded)
+            raise RuntimeError("Meta did not confirm the Reel video upload.")
+
+        finished = api_json(requests.post(
+            f"{base}/{page_id}/video_reels",
+            params={
+                "upload_phase": "finish",
+                "video_id": video_id,
+                "video_state": "PUBLISHED",
+                "description": description,
+                "title": title[:100],
             },
-            timeout=(30, 600),
-        )
-    try:
-        upload_result = uploaded.json()
-    except ValueError:
-        upload_result = {}
-    if not uploaded.ok or upload_result.get("success") is not True:
-        api_json(uploaded)
-        raise RuntimeError("Meta did not confirm the Reel video upload.")
-
-    finished = api_json(requests.post(
-        f"{base}/{page_id}/video_reels",
-        params={
-            "upload_phase": "finish",
-            "video_id": video_id,
-            "video_state": "PUBLISHED",
-            "description": description,
-            "title": title[:100],
-        },
-        headers={"Authorization": f"Bearer {page_token}"},
-        timeout=30,
-    ))
-    if finished.get("success") is not True:
-        raise RuntimeError("Meta did not confirm Reel publishing.")
+            headers={"Authorization": f"Bearer {page_token}"},
+            timeout=30,
+        ))
+        if finished.get("success") is not True:
+            raise RuntimeError("Meta did not confirm Reel publishing.")
 
     ledger["facebook"][fingerprint] = {
         "video_id": video_id,
@@ -144,17 +158,36 @@ def publish() -> dict:
         "hook": metadata.get("hook", ""),
         "published_at": datetime.now(timezone.utc).isoformat(),
     }
-    save_ledger(ledger)
+    try:
+        save_ledger(ledger)
+    except OSError as exc:
+        # The Reel is already live; retrying the publish would duplicate it.
+        print(json.dumps({"status": "ambiguous", "uploaded": True, "video_id": video_id,
+                          "reason": "Facebook published but the local duplicate ledger could not be "
+                                    "written; reconcile before retrying",
+                          "error": type(exc).__name__}, ensure_ascii=False))
+        return {"status": "ambiguous", "video_id": video_id}
     print(json.dumps({"status": "published", "video_id": video_id, "title": title}))
     return {"status": "published", "video_id": video_id}
 
 
 if __name__ == "__main__":
     try:
-        publish()
+        outcome = publish(dry_run="--dry-run" in sys.argv)
+    except PublishNotAuthorized as exc:
+        code, reason = authorization_error(exc)
+        print(json.dumps({"status": code, "reason": reason}, ensure_ascii=False))
+        raise SystemExit(2)
+    except ArtifactIntegrityError as exc:
+        # ND-M3-F1: digests diverged after authorization; nothing was uploaded.
+        print(json.dumps({"status": "blocked_artifact_integrity", "uploaded": False,
+                          "reason": str(exc)}, ensure_ascii=False))
+        raise SystemExit(2)
     except Exception as exc:
         print(f"Facebook Reel publish failed: {type(exc).__name__}: {exc}", file=sys.stderr)
         raise SystemExit(1)
+    if outcome.get("status") == "ambiguous":
+        raise SystemExit(3)
 
 
 

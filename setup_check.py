@@ -61,17 +61,17 @@ add(
 )
 
 # New modules importable
-for module in ("visual_assets", "app.voice.provider", "app.research.trends", "publish_social", "workspace_sync", "analytics_collect"):
+for module in ("app.visuals.visual_assets", "app.voice.provider", "app.research.trends", "app.publish.social_orchestrator", "app.operations.workspace_sync", "app.operations.analytics_collect"):
     add(f"Python module: {module}", module_available(module), f"Install {module} in the project virtual environment")
 
 # Strong pipeline modules
-for module in ("app.research.selector", "app.research.desk", "app.script.short", "app.script.longform", "app.script.studio", "app.script.voice_guide", "app.script.pipeline", "motion_director", "motion_render", "stock_fetcher", "model_health"):
+for module in ("app.research.selector", "app.research.desk", "app.script.short", "app.script.longform", "app.script.studio", "app.script.voice_guide", "app.script.pipeline", "app.visuals.motion_director", "app.render.legacy_api", "app.visuals.stock_fetcher", "app.providers.model_health"):
     add(f"Strong pipeline: {module}", module_available(module), f"Install {module} in the project virtual environment")
 
 add(
     "Strong pipeline: provider health",
     (ROOT / "data" / "model_health.json").is_file(),
-    "Run ./venv/bin/python model_health.py --probe --prune to record which models actually work",
+    "Run ./venv/bin/python -m app.providers.model_health --probe --prune to record which models actually work",
 )
 add(
     "Strong pipeline: image sources",

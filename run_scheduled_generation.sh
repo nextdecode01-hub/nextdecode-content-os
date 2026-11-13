@@ -11,7 +11,7 @@ fi
 
 exec 9>"$ROOT/.scheduled_generation.lock"
 if ! flock -n 9; then
-    "$PYTHON" "$ROOT/notify_status.py" "Nextdecode Studio: a scheduled generation is already running; this duplicate run was skipped." || true
+    "$PYTHON" -m app.notifications.notify_status "Nextdecode Studio: a scheduled generation is already running; this duplicate run was skipped." || true
     exit 1
 fi
 
@@ -19,7 +19,7 @@ if PUBLISH_MODE=review bash "$ROOT/run_pipeline.sh"; then
     :
 else
     status=$?
-    "$PYTHON" "$ROOT/notify_status.py" "Nextdecode Studio: scheduled Short generation or review packaging failed; no upload was started." || true
+    "$PYTHON" -m app.notifications.notify_status "Nextdecode Studio: scheduled Short generation or review packaging failed; no upload was started." || true
     exit "$status"
 fi
 
@@ -29,7 +29,7 @@ if [[ "$weekday" == "3" || "$weekday" == "6" ]]; then
         :
     else
         status=$?
-        "$PYTHON" "$ROOT/notify_status.py" "Nextdecode Studio: scheduled long-form generation failed; the Short remains queued for review." || true
+        "$PYTHON" -m app.notifications.notify_status "Nextdecode Studio: scheduled long-form generation failed; the Short remains queued for review." || true
         exit "$status"
     fi
 fi

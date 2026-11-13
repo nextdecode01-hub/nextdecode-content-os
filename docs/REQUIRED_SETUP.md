@@ -17,7 +17,7 @@ The content generator has Gemini and Groq credentials in /home/demon/shorts_stud
 5. Configure INSTAGRAM_VIDEO_URL to a stable public HTTPS URL for each generated MP4. Meta must be able to fetch the video directly. A stable host (object storage or a named Cloudflare tunnel with its own hostname) is the recommended path for scheduled runs.
 6. Alternative for scheduled runs: set `INSTAGRAM_TUNNEL_FALLBACK=true` in `.env`. `publish_all.py` then starts a temporary Cloudflare Quick Tunnel for the duration of the run and passes the generated URL to the Instagram publisher. `cloudflared` must be installed and on PATH (`~/.local/bin/cloudflared`). The tunnel URL changes every run and the tunnel only lives while the publish run is active, so it is a fallback, not a replacement for a stable host.
 
-The publisher scripts and n8n workflow are prepared to check all destinations before publishing. Facebook/Instagram stay blocked until the Meta credentials and a public media host (stable URL or tunnel fallback) are ready.
+The publisher scripts perform destination preflight and share the application-owned authorization boundary. Facebook/Instagram stay blocked until the Meta credentials and a public media host (stable URL or tunnel fallback) are ready. The autonomous task worker cannot upload or publish.
 
 ## Optional services
 

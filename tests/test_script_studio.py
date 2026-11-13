@@ -45,6 +45,36 @@ class TestScriptStudio(unittest.TestCase):
             if "game-changer" in r['hook'].lower():
                 self.assertTrue(r['score'] < 50)
 
+    def test_hook_opening_is_stable_with_abbreviations_decimals_and_punctuation(self):
+        cases = [
+            ("U.S. AI funding rose 2.5 times. Here is why.", "U.S. AI funding rose 2.5 times."),
+            ("AI agents changed the workflow? The evidence is mixed.", "AI agents changed the workflow"),
+            ("NIST updated its AI framework. Teams need to adapt.", "NIST updated its AI framework"),
+        ]
+        for voice_text, hook in cases:
+            with self.subTest(voice_text=voice_text):
+                self.assertTrue(script_studio._opening_matches_hook(voice_text, hook))
+        self.assertFalse(script_studio._opening_matches_hook(
+            "The market changed. AI agents are one reason.", "AI agents are one reason"
+        ))
+
+    def test_critique_does_not_false_fail_hook_on_decimal_or_abbreviation(self):
+        script = {
+            "title": "U.S. AI funding",
+            "voice_text": "U.S. AI funding rose 2.5 times. The shift is concentrated in applications.",
+            "hook": "U.S. AI funding rose 2.5 times.",
+            "source_urls": ["https://example.com"],
+            "word_count": 14,
+            "seconds": 35,
+            "slop_score": 0.0,
+        }
+        result = script_studio.critique(
+            script,
+            research={"claims": [{"quote": "U.S. AI funding rose 2.5 times"}],
+                      "source_urls": ["https://example.com"]},
+        )
+        self.assertNotIn("hook_position", {item["kind"] for item in result["issues"]})
+
     def test_beat_sheet_timings_monotonic_and_end_at_duration(self):
         voice_text = "First sentence here. Second sentence follows. Third sentence comes next. Fourth sentence ends it."
         duration = 35.0

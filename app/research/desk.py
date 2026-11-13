@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 
 import requests
 
+from . import atomic
 from . import topics as topic_research
 
 SCRIPT_NAME = "app/research/desk.py"
@@ -23,6 +24,32 @@ DEFAULT_TIMEOUT = 25
 DEFAULT_MAX_CHARS = 12000
 MAX_SOURCES_DEFAULT = 5
 MAX_CLAIMS = 14
+PER_SOURCE_CLAIM_CAP = 5
+
+# Feed fetchers – placeholders that return empty lists when network access is unavailable.
+def _fetch_trends() -> list[dict]:
+    """Return a list of candidate items from Google Trends.
+    In the sandbox environment network calls are blocked, so this returns an empty list.
+    """
+    return []
+
+def _fetch_hacker_news() -> list[dict]:
+    """Return a list of candidate items from Hacker News.
+    Stub implementation – returns empty list.
+    """
+    return []
+
+def _fetch_reddit(subreddit: str) -> list[dict]:
+    """Return a list of candidate items from a Reddit subreddit.
+    Stub implementation – returns empty list.
+    """
+    return []
+
+def _fetch_arxiv() -> list[dict]:
+    """Return a list of candidate items from arXiv.
+    Stub implementation – returns empty list.
+    """
+    return []
 
 
 class _HTMLTextExtractor(HTMLParser):
@@ -63,6 +90,176 @@ class _HTMLTextExtractor(HTMLParser):
         return "\n".join(self._texts)
 
 
+_BOILERPLATE_PATTERNS = tuple(re.compile(pattern, re.I) for pattern in (
+    r"\bskip to (?:main )?(?:content|navigation|search)\b",
+    r"\ban official website of the (?:united states|us) government\b",
+    r"\bhere'?s how you know\b",
+    r"\bofficial websites use \.gov\b",
+    r"\ba \.gov website belongs to an official government organization\b[^.]*\.?",
+    r"\bsecure \.gov websites use https\b",
+    r"\ba lock \([^)]*\)\s*or https:// means\b[^.]*\.?",
+    r"\bshare sensitive information only on official,? secure websites\.?",
+    r"\ball posts\b",
+    r"\bwritten by\b[^.|]{0,60}?\b(?:contributor|guest post|staff|author|senior editor|editor)\b",
+    r"\b(?:read|share|subscribe|follow|sign up|log ?in|register)\b[^.]{0,60}",
+    r"\brelated (?:articles|posts|stories|content)\b",
+    r"\b(?:privacy policy|terms of (?:service|use)|cookie (?:policy|preferences|settings))\b",
+    r"\ball rights reserved\b",
+    r"\bcopyright\s*(?:©|\(c\))?\s*\d{4}[^.]{0,40}",
+    r"\bwas this page helpful\??",
+    r"\b\d+ shares?\b",
+    r"\b(?:min|minute)s? read\b",
+))
+
+# Markers that still mean a leftover navigation fragment.
+_BOILERPLATE_MARKERS = (
+    "skip to main", "all posts", "written by", "here's how you know",
+    "cookie", "subscribe", "related articles", "all rights reserved",
+)
+
+# A breadcrumb such as "AI April 25, 2026" sits between the nav bar and the real
+# headline, and it blocks the title-echo strip below.
+_BREADCRUMB_RE = re.compile(
+    r"^\s*(?:[A-Za-z][\w'-]*\s+)?"
+    r"(?:January|February|March|April|May|June|July|August|September|October|November|December|"
+    r"Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\.?\s+\d{1,2},?\s+\d{4}\s+",
+    re.I,
+)
+
+
+# Navigation and card metadata fused onto the end of a real sentence, because
+# ``_sentence_split`` only breaks before a capital letter and the block starts
+# with lowercase "governance".  Markers are deliberately multi-word so ordinary
+# prose that happens to use one of these words is never treated as furniture.
+_TOC_MARKERS = (
+    "table of contents",
+    "frequently asked questions",
+    "faq",
+    "key takeaways",
+    "on this page",
+    "jump to section",
+)
+_TOC_BREAK_RE = re.compile(
+    r"(?=\btable of contents\b)|(?<=\btable of contents\b)|(?=\bfrequently asked questions\b)"
+    r"|(?<=\bfrequently asked questions\b)|(?=\bfaq\b)|(?<=\bfaq\b)|(?=\bkey takeaways\b)"
+    r"|(?<=\bkey takeaways\b)|(?=\bon this page\b)|(?<=\bon this page\b)"
+    r"|(?=\b\d+\s+sections?\b)",
+    re.I,
+)
+_TOC_METADATA_RE = re.compile(r"\b\d+\s+sections?\b", re.I)
+
+
+def _is_toc_or_metadata(text: str) -> bool:
+    """True for a table of contents, an FAQ heading or a card-metadata line."""
+    lowered = str(text or "").lower().strip()
+    if not lowered:
+        return False
+    if any(marker in lowered for marker in _TOC_MARKERS):
+        return True
+    # "governance 7 sections Last updated : March 28, 2026" is card chrome, and
+    # the pairing is required so "the report has 7 sections of guidance" survives.
+    return bool(_TOC_METADATA_RE.search(lowered)) and "last updated" in lowered
+
+
+def is_boilerplate(text: str) -> bool:
+    """True when a line is page furniture rather than article prose."""
+    lowered = str(text or "").lower().strip()
+    if not lowered:
+        return True
+    if any(marker in lowered for marker in _BOILERPLATE_MARKERS):
+        return True
+    if _is_toc_or_metadata(text):
+        return True
+    # A fragment that starts mid-sentence ("116-283), the goal of ...") is an
+    # extraction artifact rather than a claim.
+    if re.match(r"^(?:[\)\.,;]|\d[\d.,\s-]{0,10}\))", str(text or "").strip()):
+        return True
+    # Government sites interleave the nav bar with the article, so a line built
+    # out of menu words is never prose.  Two are required, which keeps ordinary
+    # sentences such as "home ownership" intact.
+    words = re.findall(r"[a-z][\w'-]*", lowered)
+    nav = sum(1 for word in words if word in _NAV_WORDS)
+    if nav >= 4 or (nav >= 2 and len(words) < 25):
+        return True
+    return _looks_like_furniture(str(text or ""))
+
+
+_NAV_WORDS = frozenset(
+    "search menu close home back skip next previous login sign publications topics areas "
+    "what we do about contact news events careers publications".split())
+
+
+def _is_lead_noise(sentence: str) -> bool:
+    """Leading page furniture: a leftover banner fragment, a bare URL or a nav run."""
+    text = str(sentence or "").strip()
+    if not text:
+        return True
+    if re.fullmatch(r"(?:\.?gov website\.?|https?://\S+)", text, re.I):
+        return True
+    words = re.findall(r"[A-Za-z][\w'-]*", text)
+    if not words:
+        return True
+    if len(words) <= 8 and sum(1 for word in words if word.lower() in _NAV_WORDS) >= max(2, len(words) // 2):
+        return True
+    return _looks_like_furniture(text)
+
+
+def _looks_like_furniture(sentence: str) -> bool:
+    """Headline and nav runs are mostly capitalised; prose is not.
+
+    Only the opening 25 words are judged, because a nav bar and an article
+    opening are fused into one long unpunctuated run after HTML stripping.
+    """
+    words = [word for word in re.findall(r"[A-Za-z][\w'-]*", str(sentence or ""))][:25]
+    if len(words) < 4:
+        return False
+    capitalised = sum(1 for word in words if word[:1].isupper())
+    return capitalised / len(words) >= 0.6
+
+
+def clean_article_text(text: str, title: str = "") -> str:
+    """Strip navigation, bylines and consent banners before claim extraction.
+
+    ``_strip_html`` concatenates every visible element, so a headline, its
+    byline and the nav bar arrive fused into the first "sentence".  Left in, that
+    noise became claim 1 of the Phase 10 example.
+    """
+    value = str(text or "").replace("\u2019", "'").replace("\u2018", "'")
+    value = value.replace("\u201c", '"').replace("\u201d", '"')
+    value = re.sub(r"\s+", " ", value).strip()
+    if not value:
+        return ""
+    for pattern in _BOILERPLATE_PATTERNS:
+        value = pattern.sub(" ", value)
+    # Bare URLs are not prose; the ledger records the source URL separately.
+    value = re.sub(r"https?://\S+", " ", value)
+    value = _BREADCRUMB_RE.sub(" ", value, count=1)
+    headline = re.sub(r"\s+", " ", str(title or "")).strip()
+    for candidate in (headline, headline.split("|")[0].strip()):
+        if not candidate:
+            continue
+        escaped = re.escape(candidate)
+        # The echo can sit behind a leftover category word, so allow a short lead.
+        value = re.sub(rf"^\s*(?:[A-Za-z][\w'-]{{1,20}}\s+){{0,2}}{escaped}\s*[:\-|]?\s*",
+                       " ", value, count=1, flags=re.I)
+    sentences = _sentence_split(value)
+    trimmed = 0
+    while trimmed < 6 and sentences and _is_lead_noise(sentences[0]):
+        sentences.pop(0)
+        trimmed += 1
+    value = " ".join(sentences) if sentences else value
+    # Give the navigation block its own sentence boundaries, then drop it.  A TOC
+    # arrives glued to the end of a real sentence, so without this break the
+    # whole run - prose and furniture together - becomes one claim.
+    value = _TOC_BREAK_RE.sub(". ", f" {value} ").strip()
+    sentences = [sentence for sentence in _sentence_split(value)
+                 if not _is_toc_or_metadata(sentence) and len(sentence.split()) >= 4]
+    value = " ".join(sentences)
+    value = re.sub(r"\s*\.\s*(?=\.\s|\Z)", "", value)
+    value = re.sub(r"\s{2,}", " ", value)
+    return value.strip()
+
+
 def _strip_html(html: str) -> tuple[str, str]:
     if not html:
         return "", ""
@@ -93,6 +290,15 @@ def _extract_arxiv_abs(html: str, url: str) -> tuple[str, str, str]:
 
 
 def fetch_url(url: str, *, timeout: int = DEFAULT_TIMEOUT, max_chars: int = DEFAULT_MAX_CHARS) -> dict:
+    """Fetch one public URL.
+
+    A 401/403/406 is retried once with a document-style ``Accept`` header,
+    because servers often refuse the HTML-only content negotiation rather than
+    the page itself.  That is ordinary negotiation on the same public URL: no
+    paywall, login, robots rule or rate limit is worked around.  If the server
+    still refuses, the source is reported as ``blocked`` for manual review with
+    no text, instead of being dropped silently or filled in from memory.
+    """
     result = {
         "url": url,
         "ok": False,
@@ -101,22 +307,45 @@ def fetch_url(url: str, *, timeout: int = DEFAULT_TIMEOUT, max_chars: int = DEFA
         "text": "",
         "published": "",
         "publisher": "",
+        "retrieved_at": datetime.now(timezone.utc).isoformat(),
         "error": "",
+        "blocked": False,
+        "manual_review_required": False,
     }
+    refusals = (401, 403, 406)
+    attempts = (
+        "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "application/pdf,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5",
+    )
     try:
-        resp = requests.get(
-            url,
-            headers={"User-Agent": USER_AGENT, "Accept": "text/html,application/xhtml+xml"},
-            timeout=timeout,
-            allow_redirects=True,
-        )
+        resp = None
+        for accept in attempts:
+            resp = requests.get(
+                url,
+                headers={"User-Agent": USER_AGENT, "Accept": accept},
+                timeout=timeout,
+                allow_redirects=True,
+            )
+            if resp.status_code < 400 or resp.status_code not in refusals:
+                break
         result["status_code"] = resp.status_code
-        content_type = (resp.headers.get("Content-Type", "") or "").lower()
         if resp.status_code >= 400:
             result["error"] = f"HTTP {resp.status_code}"
+            if resp.status_code in refusals:
+                result["error"] = (
+                    f"HTTP {resp.status_code} after {len(attempts)} retrieval attempts - "
+                    "server refused automated access, manual review required"
+                )
+                result["blocked"] = True
+                result["manual_review_required"] = True
             return result
+        content_type = (resp.headers.get("Content-Type", "") or "").lower()
         if content_type and not any(kind in content_type for kind in ("text/html", "application/xhtml", "text/plain", "application/xml", "text/xml")):
             result["error"] = f"unsupported content-type: {content_type.split(';')[0]}"
+            if "pdf" in content_type:
+                result["error"] += " - PDF is not parsed here, read it manually before citing"
+                result["blocked"] = True
+                result["manual_review_required"] = True
             return result
         html = resp.text or ""
         parsed = urlparse(url)
@@ -133,7 +362,7 @@ def fetch_url(url: str, *, timeout: int = DEFAULT_TIMEOUT, max_chars: int = DEFA
             return result
         text, title = _strip_html(html)
         result["title"] = title
-        result["text"] = text[:max_chars] if max_chars else text
+        result["text"] = clean_article_text(text, title)[:max_chars] if max_chars else clean_article_text(text, title)
         result["ok"] = bool(result["text"])
         if not result["ok"]:
             result["error"] = "empty content"
@@ -157,6 +386,12 @@ def extract_claims(text: str, *, source_url: str, min_quote_words: int = 8) -> l
     for sent in sentences:
         s = sent.strip()
         if not s:
+            continue
+        if is_boilerplate(s):
+            continue
+        # A lowercase start means the splitter caught the tail of a citation or a
+        # numbered reference ("116-283), the goal of ..."), not a sentence.
+        if s[:1].islower():
             continue
         # must contain concrete technical claim: number or named model/system/metric
         has_number = bool(re.search(r'\b\d+(\.\d+)?%?\b|\b\d+x\b|\bten-fold\b|\bhundred-fold\b|\bthousand-fold\b', s, re.I))
@@ -198,6 +433,18 @@ def extract_claims(text: str, *, source_url: str, min_quote_words: int = 8) -> l
             "source_url": source_url,
             "confidence": confidence,
         })
+        # A compound sentence hides which half is unproven, so each clause that
+        # survives as a verbatim substring also becomes its own claim record.
+        for piece in atomic.split_atomic(s):
+            if piece not in text:
+                continue
+            claims.append({
+                "claim": piece,
+                "quote": piece,
+                "source_url": source_url,
+                "confidence": confidence,
+                "atomic_of": s,
+            })
     return claims
 
 
@@ -413,12 +660,39 @@ def extract_limitations(text: str) -> list[str]:
     return limitations
 
 
+_FETCHABLE_SCHEMES = {"http", "https"}
+
+
+def fetchable_url(url: object) -> str:
+    """Return the candidate only when it can actually be fetched, else ``""``.
+
+    The desk reads public web pages, so anything that is not an absolute http(s)
+    URL - a bare host, ``file:``, ``data:``, ``javascript:`` - is refused here
+    instead of reaching the HTTP client, where it would surface as an opaque
+    ``requests`` exception.
+    """
+    value = str(url or "").strip()
+    if not value:
+        return ""
+    try:
+        parsed = urlparse(value)
+    except ValueError:
+        return ""
+    if parsed.scheme.lower() not in _FETCHABLE_SCHEMES or not parsed.netloc:
+        return ""
+    return value
+
+
 def _dedupe_source_urls(urls: list[str]) -> list[str]:
-    """Collapse mirrors of the same document (e.g. arxiv html/abs/pdf)."""
+    """Keep fetchable http(s) URLs and collapse mirrors of the same document.
+
+    Validation happens before de-duplication so a rejected entry can never mask
+    an identical accepted one; the caller reports what was dropped.
+    """
     seen: set[str] = set()
     out: list[str] = []
     for url in urls:
-        url = str(url or "").strip()
+        url = fetchable_url(url)
         if not url:
             continue
         match = re.search(r"arxiv\.org/(?:abs|html|pdf)/([^/?#]+)", url, re.I)
@@ -428,6 +702,33 @@ def _dedupe_source_urls(urls: list[str]) -> list[str]:
         seen.add(key)
         out.append(url)
     return out
+
+
+def merge_duplicate_claims(claims: list[dict], *, threshold: float = 0.6) -> list[dict]:
+    """Collapse the same fact reported by several pages into one record.
+
+    Two outlets stating one fact produce one claim with two sources.  Counting
+    them as two claims would inflate the ledger and fake corroboration.
+    """
+    from app.research import lineage
+
+    merged: list[dict] = []
+    for claim in claims or []:
+        text = str(claim.get("claim") or "")
+        twin = None
+        for existing in merged:
+            if lineage.similarity(text, str(existing.get("claim") or ""), size=3) >= threshold:
+                twin = existing
+                break
+        if twin is None:
+            record = dict(claim)
+            record["also_reported_by"] = []
+            merged.append(record)
+            continue
+        url = str(claim.get("source_url") or "")
+        if url and url not in twin["also_reported_by"] and url != twin.get("source_url"):
+            twin["also_reported_by"].append(url)
+    return merged
 
 
 def research_topic(topic: str, *, source_urls: list[str] | None = None, max_sources: int = MAX_SOURCES_DEFAULT) -> dict:
@@ -458,7 +759,14 @@ def research_topic(topic: str, *, source_urls: list[str] | None = None, max_sour
                         urls_to_fetch.append(u)
             except Exception as e:
                 result["errors"].append(f"search_web error: {e}")
+        rejected = [str(u) for u in urls_to_fetch if not fetchable_url(u)]
         urls_to_fetch = _dedupe_source_urls(urls_to_fetch)
+        if rejected:
+            # Dropped candidates are reported, never hidden: a feed or search
+            # result that is not a fetchable page is a data-quality failure.
+            preview = ", ".join(item[:120] for item in rejected[:5])
+            result["errors"].append(
+                f"rejected {len(rejected)} non-fetchable candidate URL(s): {preview}")
         if not urls_to_fetch:
             result["errors"].append("no candidate source URLs for topic")
             return result
@@ -502,13 +810,25 @@ def research_topic(topic: str, *, source_urls: list[str] | None = None, max_sour
         # prefer secondary on different domain
         # ensure we only take up to what makes sense
         result["secondary"] = secondary[:2]
-        # extract claims from the primary source and at most one independent secondary
-        claim_sources = [primary] + result["secondary"][:1]
-        all_claims = []
-        for p in claim_sources:
+        # Extract from every relevant page, not just the first two.  Reading only
+        # the primary plus one secondary left all 14 Phase 10 claims attached to a
+        # single blog while four NIST pages sat unused in the manifest.
+        # Round-robin across sources with a per-page cap, otherwise the longest
+        # article fills every slot and the ledger still has one voice.
+        per_source: list[list[dict]] = []
+        for p in fetched_pages:
             txt = p.get("text", "") or ""
-            all_claims.extend(extract_claims(txt, source_url=p.get("url", "")))
-        result["claims"] = all_claims[:MAX_CLAIMS]
+            items = extract_claims(txt, source_url=p.get("url", ""))[:PER_SOURCE_CLAIM_CAP]
+            for item in items:
+                item["source_published"] = p.get("published", "")
+            if items:
+                per_source.append(items)
+        interleaved: list[dict] = []
+        for index in range(max((len(items) for items in per_source), default=0)):
+            for items in per_source:
+                if index < len(items):
+                    interleaved.append(items[index])
+        result["claims"] = merge_duplicate_claims(interleaved)[:MAX_CLAIMS]
         # contradictions
         try:
             result["contradictions"] = find_contradictions(result["claims"])
@@ -517,7 +837,7 @@ def research_topic(topic: str, *, source_urls: list[str] | None = None, max_sour
             result["contradictions"] = []
         # unsupported numbers - the topic's own figures must appear in the sources
         try:
-            combined_sources = "\n".join([p.get("text", "") for p in claim_sources])
+            combined_sources = "\n".join([p.get("text", "") for p in fetched_pages])
             unsupported = find_unsupported_numbers(topic, combined_sources)
             result["unsupported_numbers"] = unsupported
         except Exception as e:
@@ -526,7 +846,7 @@ def research_topic(topic: str, *, source_urls: list[str] | None = None, max_sour
         # limitations
         try:
             lims = []
-            for p in claim_sources:
+            for p in fetched_pages:
                 lims.extend(extract_limitations(p.get("text", "")))
             # deduplicate
             seen = set()
@@ -615,15 +935,131 @@ def render_report(research: dict) -> str:
     return "\n".join(lines)
 
 
+def bundle_topic_and_research(mode: str = "normal") -> dict:
+    """Pick the highest‑ranked daily topic, fetch the article, extract claims, and return a JSON bundle.
+
+    The function now supports a retry loop: it will attempt up to ``MAX_RETRIES`` times to find a
+    candidate whose ``rank`` meets ``MIN_RANK`` (both configurable via environment variables).  If
+    ``mode`` is ``"viral-hook"`` an additional ``viral_hook`` field is added to the output when the
+    selected candidate contains a ``viral_hook`` key.
+    """
+    import os
+    max_retries = int(os.getenv("MAX_RETRIES", "3"))
+    min_rank = float(os.getenv("MIN_RANK", "0"))
+    attempts = 0
+    while attempts < max_retries:
+        attempts += 1
+        # Gather candidates from all feeds
+        candidates = (
+            _fetch_trends()
+            + _fetch_hacker_news()
+            + _fetch_reddit("technology")
+            + _fetch_arxiv()
+        )
+        if not candidates:
+            return {"error": "no candidates found"}
+        # Choose the entry with the highest rank
+        best = max(candidates, key=lambda itm: itm.get("rank", 0))
+        if best.get("rank", 0) < min_rank:
+            # Not good enough, try again
+            continue
+        chosen_url = best.get("url")
+        # Pull the full article (HTML → plain text)
+        article = fetch_url(chosen_url)
+        # Extract claims using the existing routine
+        claims = extract_claims(
+            article.get("text", ""),
+            source_url=chosen_url,
+            min_quote_words=8,
+        )
+        # Assemble the bundle
+        bundle = {
+            "topic": best.get("title", ""),
+            "source": best.get("source", ""),
+            "url": chosen_url,
+            "title": article.get("title", ""),
+            "published": article.get("published", ""),
+            "claims": claims,
+        }
+        if mode == "viral-hook" and best.get("viral_hook"):
+            bundle["viral_hook"] = best["viral_hook"]
+        return bundle
+    # If we exit the loop without a suitable candidate
+    return {"error": "no suitable candidate found after retries"}
+
+    """Pick the highest‑ranked daily topic, fetch the article,
+    extract claims, and return a ready‑to‑use JSON bundle.
+
+    Output schema:
+    {
+        "topic": str,
+        "source": str,
+        "url": str,
+        "title": str,
+        "published": str,
+        "claims": [
+            {
+                "claim": str,
+                "quote": str,
+                "confidence": float,
+                "source_url": str,
+                "published": str
+            },
+            ...
+        ]
+    }
+    """
+    # Gather candidates from all feeds
+    candidates = (
+        _fetch_trends()
+        + _fetch_hacker_news()
+        + _fetch_reddit("technology")
+        + _fetch_arxiv()
+    )
+    if not candidates:
+        return {"error": "no candidates found"}
+
+    # Choose the entry with the highest rank
+    best = max(candidates, key=lambda itm: itm.get("rank", 0))
+    chosen_url = best.get("url")
+
+    # Pull the full article (HTML → plain text)
+    article = fetch_url(chosen_url)
+
+    # Extract claims using the existing routine
+    claims = extract_claims(
+        article.get("text", ""),
+        source_url=chosen_url,
+        min_quote_words=8,
+    )
+
+    # Assemble the bundle
+    return {
+        "topic": best.get("title", ""),
+        "source": best.get("source", ""),
+        "url": chosen_url,
+        "title": article.get("title", ""),
+        "published": article.get("published", ""),
+        "claims": claims,
+    }
+
+
+
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description="Research desk")
+    parser = argparse.ArgumentParser(description="Research Desk CLI")
+    parser.add_argument("--mode", choices=["normal", "viral-hook"], default="normal", help="Select operation mode: normal or viral-hook")
+    parser.add_argument("--bundle", action="store_true", help="Output a JSON bundle of the best topic and extracted claims")
+
     parser.add_argument("topic", nargs="?", help="Topic to research")
     parser.add_argument("--urls", nargs="*", default=None, help="Source URLs")
     parser.add_argument("--json", action="store_true", help="Output JSON")
     args = parser.parse_args(argv)
-    if not args.topic:
+    if not args.topic and not args.bundle:
         parser.print_help()
         return 1
+    if args.bundle:
+        print(json.dumps(bundle_topic_and_research(args.mode), indent=2))
+        return 0
     research = research_topic(args.topic, source_urls=args.urls if args.urls else None)
     if args.json:
         print(json.dumps(research, indent=2))
