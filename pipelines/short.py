@@ -543,6 +543,7 @@ def main():
         print(json.dumps({
             "status": "success",
             "quality": "strong",
+            "content_format": data.get("content_format", args.content_format),
             "run_id": data.get("run_id", ""),
             "title": data["title"],
             "video_path": str(output_mp4),
@@ -693,6 +694,7 @@ def main():
         print(json.dumps({
             "status": "success",
             "quality": "strong",
+            "content_format": data.get("content_format", args.content_format),
             "run_id": data.get("run_id", ""),
             "title": data["title"],
             "video_path": str(output_mp4),
@@ -713,6 +715,7 @@ def main():
         "status": "success",
         "quality": "standard",
         "legacy": True,
+        "content_format": data.get("content_format", args.content_format),
         "title": data["title"],
         "video_path": str(output_mp4),
         "tags": data.get("tags", []),
