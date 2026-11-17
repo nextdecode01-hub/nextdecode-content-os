@@ -21,5 +21,5 @@ def test_automatic_topic_selection_uses_combined_discovery_and_reports_sources()
         result = pipeline.select_topic(None, limit=12, min_score=60)
 
     discover.assert_called_once_with(limit=12)
-    score.assert_called_once_with(candidates, limit=1, min_score=60)
+    score.assert_called_once_with(candidates, limit=1, min_score=60, channel_id=None)
     assert result["selected"] == selected

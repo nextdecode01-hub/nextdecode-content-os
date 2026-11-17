@@ -591,6 +591,8 @@ def main():
                 runs_root=work_dir / "runs",
                 index_path=SCRIPT_DIR / "data" / "runs" / "index.jsonl",
                 quality="strong",
+                channel_id=format_contract["channel_id"],
+                content_format=format_contract["format_id"],
             )
             print(f"[*] Run directory: {tracker.run_dir}")
             # Persist each real producer stage as it starts and finishes.

@@ -1,6 +1,6 @@
-# Shorts Studio documentation index
+# NEXTDECODE Content OS documentation index
 
-This directory separates operational documentation, the canonical NEXTDECODE planning mirror, historical source material, and workstream-specific records.
+This directory separates current Content OS architecture and operational documentation, the canonical NEXTDECODE planning mirror, historical source material, and workstream-specific records. Start with the root [README](../README.md) for the current product overview, supported-format boundaries, local setup, verification commands and release-readiness status.
 
 ## Main areas
 

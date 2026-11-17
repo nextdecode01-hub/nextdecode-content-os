@@ -108,11 +108,6 @@ def _validated_start_request(data) -> dict:
             "content_format": capability.format_id,
             "reason": capability.description,
         })
-    if capability.producer == "long_video" and dry_run:
-        raise HTTPException(status_code=422, detail={
-            "code": "longform_dry_run_not_implemented",
-            "reason": "Long-form has no safe dry-run producer; set dry_run=false to explicitly request a real draft render.",
-        })
     return {"dry_run": dry_run, "topic": topic.strip(), "quality": quality.strip(),
             "content_format": capability.format_id}
 
@@ -219,12 +214,16 @@ def run_job(job_id: str, dry_run: bool, topic: str, quality: str, content_format
 
     env = os.environ.copy()
     env["DRY_RUN"] = "1" if dry_run else "0"
+    if dry_run:
+        # A dry-run render is an explicit local render-mechanics check with
+        # procedural visuals and a permanent draft/not-for-publish governance
+        # stamp. The production storyboard gate stays fail-closed: it is only
+        # relaxed to `warn` inside the isolated dry-run child process, never for
+        # a production render. Direct CLI dry-runs keep the production default.
+        env["STORYBOARD_GATE"] = "warn"
     capability = get_format_capability(content_format)
     if capability.status != "supported":
         _update_job(job_id, {"status": "failed", "error": f"content_format_not_implemented: {content_format}"})
-        return
-    if capability.producer == "long_video" and dry_run:
-        _update_job(job_id, {"status": "failed", "error": "longform_dry_run_not_implemented; set dry_run=false to explicitly request a real draft render"})
         return
     if capability.producer == "long_video":
         cmd = [sys.executable, "-m", "pipelines.longform",

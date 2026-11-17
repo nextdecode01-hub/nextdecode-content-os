@@ -504,6 +504,153 @@ def _motion_diagram_parts(visual_type: str, accent: str, index: int, variant: in
     return diagram, text
 
 
+DRY_RUN_TEXT = (
+    "Local dry run proves the long-form pipeline can move from voice to background "
+    "to captions to a checked horizontal render without calling a paid model. Every "
+    "stage uses local tools: ffmpeg creates a calibration tone and a procedural "
+    "background, while stream and geometry checks run exactly as far as they can "
+    "without real narration, research or stock. The video is not publishable because "
+    "it carries no narration, research ledger or reviewed storyboard, but the file "
+    "structure, duration, audio stream and 1920 by 1080 geometry are verified. This "
+    "run also confirms that the target-tree entrypoint imports resolve. No API key "
+    "was read, no research request was sent, and no upload or approval step was "
+    "triggered. Keep the dry run separate from production metadata and review queues."
+)
+
+
+def _draft_governance(entry: str) -> dict:
+    """Stamp non-governed producer paths as permanently draft-only."""
+    if entry != "dry_run":
+        raise ValueError(f"Unsupported draft governance entry: {entry}")
+    return {
+        "entry": entry,
+        "publishable": False,
+        "reason": "this producer path does not run the approved orchestration and review gates",
+    }
+
+
+def _dry_run_background(output_path: Path, duration: float) -> None:
+    seconds = int(duration) + 3
+    subprocess.run([
+        "ffmpeg", "-y", "-f", "lavfi",
+        "-i", f"color=c=0x070b14:s=1920x1080:r=30:d={seconds}",
+        "-vf", "noise=alls=6:allf=t+u,drawgrid=width=120:height=120:thickness=1:color=0x22d3ee@0.10",
+        "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+        "-t", str(seconds), str(output_path),
+    ], check=True)
+
+
+def _dry_run_subtitles(output: Path) -> None:
+    """Minimal deterministic ASS caption track; not derived from any narration."""
+    header = """[Script Info]\nScriptType: v4.00+\nPlayResX: 1920\nPlayResY: 1080\n\n[V4+ Styles]\nFormat: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding\nStyle: Default,DejaVu Sans,46,&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,1,2,80,80,70,1\n\n[Events]\nFormat: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text\n"""
+    lines = [
+        "Dialogue: 0,0:00:00.00,0:00:08.00,Default,,0,0,0,,DRY RUN - LOCAL PIPELINE CHECK",
+        "Dialogue: 0,0:00:08.00,0:00:16.00,Default,,0,0,0,,NO RESEARCH, NO NARRATION, NO STOCK",
+        "Dialogue: 0,0:00:16.00,0:00:29.00,Default,,0,0,0,,NOT FOR PUBLISH - RENDER MECHANICS ONLY",
+    ]
+    output.write_text(header + "\n".join(lines) + "\n", encoding="utf-8")
+
+
+def run_dry_run(work_dir: Path, metadata_file: Path) -> dict:
+    """Exercise the local horizontal render path without LLM, research, stock or upload.
+
+    Dry-run visuals are procedural and have no human-reviewed storyboard, so the
+    same fail-closed gate applies: STORYBOARD_GATE must be opted out explicitly
+    (the API sets it to `warn` for dry-run jobs only; direct CLI invocations keep
+    the production default). The artifact is never publishable.
+    """
+    from app.visuals.storyboard import enforce_review_gate
+
+    enforce_review_gate({
+        "review_status": "needs_review",
+        "review_reasons": [
+            "procedural dry-run visuals have no human-reviewed storyboard"
+        ],
+    })
+
+    work_dir.mkdir(parents=True, exist_ok=True)
+    audio_path = work_dir / "voice.mp3"
+    background_path = work_dir / "background.mp4"
+    ass_path = work_dir / "subtitles.ass"
+    video_path = work_dir / "output_longform.mp4"
+
+    print("[*] DRY_RUN=1: skipping LLM, research, stock, archive, and upload stages.")
+    # A truly silent track is correctly rejected by production audio QA. Use a
+    # low-risk audible calibration tone so the dry-run can exercise muxing and
+    # audio-stream validation without pretending to synthesize narration.
+    duration = 30.0
+    subprocess.run([
+        "ffmpeg", "-y", "-f", "lavfi", "-i",
+        f"sine=frequency=440:sample_rate=44100:duration={duration}",
+        "-c:a", "libmp3lame", "-b:a", "128k", str(audio_path),
+    ], check=True, capture_output=True, text=True)
+    probe = subprocess.run([
+        "ffprobe", "-v", "error", "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1", str(audio_path),
+    ], capture_output=True, text=True, check=True)
+    measured_duration = float(probe.stdout.strip() or 0)
+    if measured_duration <= 0:
+        raise RuntimeError("Dry-run calibration audio has no measurable duration.")
+    duration = measured_duration
+
+    _dry_run_background(background_path, duration)
+    _dry_run_subtitles(ass_path)
+    escaped = str(ass_path).replace("\\", "/").replace(":", "\\:")
+    subprocess.run([
+        "ffmpeg", "-v", "error", "-y", "-stream_loop", "-1",
+        "-i", str(background_path), "-i", str(audio_path),
+        "-filter_complex",
+        f"[0:v]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,subtitles='{escaped}'[v]",
+        "-map", "[v]", "-map", "1:a",
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
+        "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2",
+        "-shortest", str(video_path),
+    ], check=True)
+    probe = subprocess.run([
+        "ffprobe", "-v", "error",
+        "-show_entries", "format=duration:stream=codec_type,width,height,sample_rate,channels,duration",
+        "-of", "json", str(video_path),
+    ], capture_output=True, text=True, check=True)
+    details = json.loads(probe.stdout)
+    video = next((stream for stream in details.get("streams", []) if stream.get("codec_type") == "video"), None)
+    audio_stream = next((stream for stream in details.get("streams", []) if stream.get("codec_type") == "audio"), None)
+    measured_total = float(details.get("format", {}).get("duration", 0))
+    # Dry-run scope only: the production long-form QA (120-600s, loudness, audience)
+    # is intentionally NOT applied to a 30s calibration render.
+    if (
+        not video
+        or (video.get("width"), video.get("height")) != (1920, 1080)
+        or not audio_stream
+        or measured_total < duration - 0.5
+    ):
+        raise RuntimeError(
+            f"Long-form dry-run QA failed: duration={measured_total:.1f}s "
+            f"(audio {duration:.1f}s), dimensions={video}, audio={audio_stream}"
+        )
+    metadata = {
+        "dry_run": True,
+        "quality": "dry_run",
+        "title": "DRY RUN - local long-form pipeline check",
+        "topic": "DRY_RUN local verification",
+        "hook": "Local dry run proves the long-form render path end to end without paid models, research or stock footage.",
+        "voice_text": "",
+        "audio_test_signal": "440Hz calibration tone; not narration",
+        "word_count": 0,
+        "duration_seconds": measured_total,
+        "broll_query": "local procedural background",
+        "chapters": [],
+        "visuals": {"mode": "procedural_dry_run", "asset_count": 0},
+        "human_review_status": "not_for_publish",
+        "governance": _draft_governance("dry_run"),
+        "source_urls": [],
+        "video_path": str(video_path),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    metadata_file.parent.mkdir(parents=True, exist_ok=True)
+    metadata_file.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+    return metadata
+
+
 def subtitles(audio: Path, output: Path):
     from faster_whisper import WhisperModel
     model = WhisperModel("base", device="cpu", compute_type="int8")
@@ -572,6 +719,27 @@ def main():
     parser.add_argument("--content-format", choices=["youtube_longform"], default="youtube_longform")
     args = parser.parse_args()
     contract = resolve_content_format(args.content_format, producer="long_video")
+    if os.getenv("DRY_RUN", "").strip().lower() in {"1", "true", "yes"}:
+        dry_dir = ROOT / "outputs" / "longform_dry_run"
+        dry_metadata = ROOT / "data" / "longform_dry_run_metadata.json"
+        data = run_dry_run(dry_dir, dry_metadata)
+        data["content_format"] = contract["format_id"]
+        data["content_format_contract"] = contract
+        # Persist the complete format binding, not only the console summary.
+        dry_metadata.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        print(json.dumps({
+            "status": "success",
+            "dry_run": True,
+            "format": args.content_format,
+            "content_format": args.content_format,
+            "quality": "dry_run",
+            "title": data["title"],
+            "video_path": data["video_path"],
+            "duration_seconds": data["duration_seconds"],
+            "word_count": data["word_count"],
+            "metadata_path": str(dry_metadata),
+        }))
+        return
     data = generate_script(args.topic)
     data["content_format"] = contract["format_id"]
     data["content_format_contract"] = contract

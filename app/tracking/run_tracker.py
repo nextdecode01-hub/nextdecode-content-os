@@ -580,6 +580,8 @@ class RunTracker:
             "run_id": self.run_id,
             "status": self.manifest.get("status", ""),
             "topic": self.manifest.get("topic", ""),
+            "channel_id": self.manifest.get("channel_id", ""),
+            "content_format": self.manifest.get("content_format", ""),
             "started_at": self.manifest.get("started_at"),
             "finished_at": self.manifest.get("finished_at"),
             "failure_stage": failure.get("stage"),
@@ -600,8 +602,16 @@ def start_run(
     index_path: Path | str | None = None,
     now: datetime | None = None,
     quality: str = "strong",
+    channel_id: str = "",
+    content_format: str = "",
 ) -> RunTracker:
     """Create a unique run directory and its ``in_progress`` manifest.
+
+    ``channel_id`` and ``content_format`` bind the run to the channel and the
+    format it was commissioned for.  Topic rotation reads this history per
+    channel, so two channels never rotate against each other's videos.  Both
+    are optional for callers/tests that predate channel isolation; an empty
+    value is recorded honestly as "not attributed".
 
     ``runs_root`` and ``index_path`` are injectable (tests use temporary
     directories only).  Collisions on the same timestamp are resolved with
@@ -634,6 +644,8 @@ def start_run(
         "status": "in_progress",
         "quality": quality,
         "topic": topic or "",
+        "channel_id": str(channel_id or ""),
+        "content_format": str(content_format or ""),
         "started_at": _iso(stamp_dt),
         "finished_at": None,
         "artifacts": {},

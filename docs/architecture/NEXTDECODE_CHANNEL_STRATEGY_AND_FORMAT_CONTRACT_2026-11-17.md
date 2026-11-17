@@ -76,8 +76,32 @@ Every future channel must have its own profile, niche allowlist, audience promis
 - `app/script/short.py` and `app/script/longform.py` now use the focused NEXTDECODE positioning in their editorial prompts.
 - `config/brain/project_context.v1.json` has been aligned with the multi-format positioning.
 
-This is a first profile-and-eligibility increment, not a claim that every format already has a complete production and publishing pipeline. The next engineering step is to make the selected format an explicit first-class job input and route it to the correct script, visual, render, QA, metadata and publishing contract.
+This is a first profile-and-eligibility increment, not a claim that every format already has a complete production and publishing pipeline. The next engineering step is to make the selected format an explicit first-class job input and route it to the correct script, visual, render, QA, metadata and publishing contract. That routing now exists for the video producers (section 8); post and carousel artifacts are still unimplemented and fail closed.
 
 ## 7. Governance
 
 Human approval remains mandatory before publishing. Automatic public publishing remains disabled. Local-first/free-first and evidence/rights provenance requirements remain in force.
+
+## 8. Engine state implemented after this contract
+
+**Content format is a first-class job input.** `content_format` is accepted by the short/reel orchestrator (`pipelines/short.py`), the long-form producer (`pipelines/longform.py`) and the strong pipeline (`app/script/pipeline.py`). It is validated before any research or model call by `app/content/formats.py::resolve_content_format`, which fails closed in four ways:
+
+| Requested | Producer | Result |
+| --- | --- | --- |
+| `youtube_shorts`, `instagram_reels`, `facebook_reels` | `short_video` | executes the vertical short/reel pipeline |
+| `youtube_longform` | `long_video` | executes the horizontal long-form producer |
+| a declared format with no adapter (`instagram_carousels`, `*_posts`) | — | rejected: "declared in the channel profile but has no producer yet" |
+| an unknown format id | — | rejected as unknown |
+
+A format is never silently produced as a Short, and a long-form request can never enter the short pipeline. The validated contract is recorded in run metadata as `content_format_contract` (channel, producer, platforms, declared formats) while `content_format` stays a plain string for API and dashboard compatibility.
+
+**Rotation is niche-scoped, not category-blocking.** The earlier "never repeat the previous category" hard block was superseded by the owner's niche directive. Automatic selection now:
+
+1. rejects any out-of-niche story outright, even when it scores well on craft (this is a quality gate, not a score edit);
+2. prefers a different primary pillar from the previous delivered video when an alternative is within 10 scorecard points (`CHANNEL_ROTATION_TOLERANCE`);
+3. keeps the same pillar when no acceptable alternative exists, because leaving the niche is never an option;
+4. records the decision (`category_rotation`, with `rotation_unit: niche_lane`, previous/candidate lane, repeat flag and reason) in `topic_selection` metadata. Scores are never adjusted.
+
+Explicit human topic requests are an editorial override: they are not rotated, but an off-niche or repeat-pillar request is logged as a warning so review sees it.
+
+**Runs are attributed to a channel.** `start_run` now records `channel_id` and `content_format` in the run manifest and in `data/runs/index.jsonl`. Rotation history is read per channel, so a second channel's deliveries never steer NEXTDECODE's rotation. Index rows written before attribution existed carry no `channel_id`; they belong to the original NEXTDECODE channel and are not attributed to any other channel.

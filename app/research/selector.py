@@ -106,9 +106,10 @@ ANALYTICS_HISTORY_PATH = ROOT / "data" / "analytics_history.json"
 FEEDBACK_LEDGER_PATH = ROOT / "data" / "feedback_ledger.csv"
 RUN_INDEX_PATH = ROOT / "data" / "runs" / "index.jsonl"
 
-# Editorial rule: the next video never repeats the category of the previous
-# delivered video.  Only runs that actually produced a video count — failed
-# debug runs must not steer the editorial calendar.
+# Editorial rule: the next video stays inside the channel niche and, when an
+# equally good alternative exists, moves to a different niche pillar than the
+# previous delivered video.  Only runs that actually produced a video count —
+# failed debug runs must not steer the editorial calendar.
 DELIVERED_RUN_STATUSES = frozenset({
     "ok", "rendered", "awaiting_review", "approved", "published", "promoted",
 })
@@ -116,6 +117,10 @@ CATEGORY_ROTATION_HISTORY = 3
 # Within this many scorecard points, a story on a different niche pillar wins
 # the slot over one that repeats the previous video's pillar.
 CATEGORY_ROTATION_SCORE_TOLERANCE = 10.0
+# Index rows written before runs were attributed to a channel belong to the
+# original NEXTDECODE channel.  They keep counting for that channel's rotation
+# and are never attributed to a second channel.
+LEGACY_CHANNEL_ID = "nextdecode"
 
 USER_AGENT = "NextdecodeTopicSelector/1.0 (editorial topic selection)"
 
@@ -374,12 +379,19 @@ def load_used_topics(path: Path | None = None) -> list[str]:
 
 
 def load_recent_run_topics(path: Path | None = None, *,
-                           limit: int = CATEGORY_ROTATION_HISTORY) -> list[str]:
+                           limit: int = CATEGORY_ROTATION_HISTORY,
+                           channel_id: str | None = None) -> list[str]:
     """Topics of the most recently delivered videos, oldest first.
 
     `data/runs/index.jsonl` is the only ledger that records every run's topic,
     so it is the rotation source of truth.  Runs that never produced a video
     (failed/debug attempts) are ignored: they are not editorial output.
+
+    ``channel_id`` scopes the history to one channel.  Rows written before run
+    attribution existed carry no ``channel_id``; they were produced by the
+    original NEXTDECODE channel, so they still count for ``LEGACY_CHANNEL_ID``
+    and never leak into another channel's rotation.  ``channel_id=None`` keeps
+    the unscoped behaviour for callers that want the whole ledger.
     """
     target = Path(path) if path else RUN_INDEX_PATH
     try:
@@ -388,6 +400,7 @@ def load_recent_run_topics(path: Path | None = None, *,
         lines = target.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
         return []
+    scoped = str(channel_id or "").strip()
     delivered: list[str] = []
     for line in lines:
         line = line.strip()
@@ -401,6 +414,10 @@ def load_recent_run_topics(path: Path | None = None, *,
             continue
         if str(row.get("status") or "").strip().lower() not in DELIVERED_RUN_STATUSES:
             continue
+        if scoped:
+            row_channel = str(row.get("channel_id") or "").strip() or LEGACY_CHANNEL_ID
+            if row_channel != scoped:
+                continue
         topic = str(row.get("topic") or "").strip()
         if topic:
             delivered.append(topic)
@@ -408,16 +425,28 @@ def load_recent_run_topics(path: Path | None = None, *,
 
 
 def load_rotation_lanes(path: Path | None = None, *,
-                        limit: int = CATEGORY_ROTATION_HISTORY) -> list[str]:
+                        limit: int = CATEGORY_ROTATION_HISTORY,
+                        channel_id: str | None = None) -> list[str]:
     """Niche pillars of the most recent delivered videos, oldest first."""
     from app.research.channel_profile import primary_niche_lane
 
     lanes: list[str] = []
-    for topic in load_recent_run_topics(path, limit=limit):
+    for topic in load_recent_run_topics(path, limit=limit, channel_id=channel_id):
         lane = primary_niche_lane(topic)
         if lane:
             lanes.append(lane)
     return lanes
+
+
+def active_channel_id() -> str:
+    """The channel the engine is currently configured to produce for."""
+    try:
+        from app.research.channel_profile import load_channel_profile
+
+        profile = load_channel_profile()
+    except Exception:
+        return LEGACY_CHANNEL_ID
+    return str(profile.get("channel_id") or "").strip() or LEGACY_CHANNEL_ID
 
 
 def _entry_lane(entry: dict) -> str:
@@ -1926,7 +1955,8 @@ def rank_topics(candidates: list, *, weights: dict | None = None,
 
 def select_best(candidates: list, *, limit: int = 1, weights: dict | None = None,
                 min_score: int = DEFAULT_MIN_SCORE, past_performance: dict | None = None,
-                recent_niche_lanes: list[str] | None = None) -> dict:
+                recent_niche_lanes: list[str] | None = None,
+                channel_id: str | None = None) -> dict:
     """Pick the best in-niche topic, preferring a fresh niche pillar.
 
     Two things are enforced. First, an out-of-niche story is rejected outright:
@@ -1994,10 +2024,12 @@ def select_best(candidates: list, *, limit: int = 1, weights: dict | None = None
         })
 
     recent_lanes = (
-        load_rotation_lanes() if recent_niche_lanes is None
+        load_rotation_lanes(channel_id=channel_id or active_channel_id())
+        if recent_niche_lanes is None
         else [str(item) for item in recent_niche_lanes if str(item).strip()]
     )
     ordered, rotation = apply_niche_rotation(accepted, recent_lanes)
+    rotation["channel_id"] = str(channel_id or active_channel_id())
 
     selected = ordered[0] if ordered else None
     method = (

@@ -130,6 +130,7 @@ def select_topic(
     used_topics_file: Path | None = None,
     limit: int = DEFAULT_CANDIDATE_LIMIT,
     min_score: int = DEFAULT_MIN_TOPIC_SCORE,
+    channel_id: str | None = None,
 ) -> dict:
     """Pick the topic for this run.
 
@@ -142,7 +143,10 @@ def select_topic(
         scored = topic_selector.rank_topics([{"title": topic}])
         entry = scored[0] if scored else {"topic": topic, "total_score": 0}
         rotation = topic_selector.niche_rotation_for_entry(
-            entry, topic_selector.load_rotation_lanes()
+            entry,
+            topic_selector.load_rotation_lanes(
+                channel_id=channel_id or topic_selector.active_channel_id()
+            ),
         )
         rotation["rule"] = (
             "prefer a different niche pillar than the previous delivered video, "
@@ -173,7 +177,9 @@ def select_topic(
     if not candidates:
         raise RuntimeError("No research candidates were discovered; cannot pick a topic.")
     _log(f"Scoring {len(candidates)} candidate topic(s) on the editorial scorecard...")
-    result = topic_selector.select_best(candidates, limit=1, min_score=min_score)
+    result = topic_selector.select_best(
+        candidates, limit=1, min_score=min_score, channel_id=channel_id
+    )
     selected = result.get("selected")
     if not selected:
         detail = "; ".join(
@@ -761,7 +767,12 @@ def run(
 
     selection = execute_stage(
         "topic_selection",
-        lambda: select_topic(topic, used_topics_file=used_topics_file, min_score=min_topic_score),
+        lambda: select_topic(
+            topic,
+            used_topics_file=used_topics_file,
+            min_score=min_topic_score,
+            channel_id=format_contract["channel_id"],
+        ),
         lambda r: {"engine": "topic_selector", "kind": "deterministic"},
     )
     chosen = selection.get("selected") or {}
