@@ -164,8 +164,8 @@ See [publishing package governance](app/publish/README.md), [documentation index
 
 The repository's GitHub Actions workflow is `.github/workflows/ci.yml`. It currently checks Python 3.14 compilation, shell syntax, dependency consistency and the Python test suite. The dashboard has its own Vitest suite and Vite production build, which should be run locally as shown above.
 
-Latest locally recorded verification before this README revision:
-- Python: **1,431 passed, 12 skipped, 75 subtests passed**.
+Latest local verification for this baseline (17 November 2026):
+- Python: **1,439 passed, 12 skipped, 75 subtests passed**.
 - Dashboard: **10 test files passed, 26 tests passed**.
 - Dashboard production build: passed, with a bundle-size warning (main JavaScript chunk exceeds 500 kB).
 
