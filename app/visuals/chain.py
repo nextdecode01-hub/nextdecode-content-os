@@ -5,9 +5,9 @@ claims, lists) or ``broll`` (ambient visual) and gets a short English keyword.
 Resolution order:
 
     motion_graphic -> local card (ffmpeg, no API)
-    broll          -> Pixabay video -> Pexels video (if configured)
-                      -> Wikimedia still -> AI image (only when a keyed
-                      provider is configured) -> gradient + caption
+    broll          -> Pixabay video -> Coverr video (if configured)
+                      -> Wikimedia/Openverse still -> AI image (only when a
+                      configured provider is available) -> gradient + caption
 
 Stock b-roll scenes are capped below half of the video. Logs never include
 credentials or request URLs.
@@ -24,6 +24,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
+
+from app.visuals.scene_component_adapter import render_scene_component
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CACHE_DIR = PROJECT_ROOT / "data" / "cache" / "pixabay"
@@ -66,7 +68,7 @@ VERB_PHRASE_STOPWORDS = frozenset({
 
 GRAPHIC_FALLBACK_CHAIN = ["local_card", "gradient_caption", "procedural"]
 BROLL_FALLBACK_CHAIN = [
-    "pixabay_video", "pexels_video", "wikimedia_still",
+    "pixabay_video", "coverr_video", "wikimedia_still", "openverse_image",
     "ai_image", "gradient_caption", "procedural",
 ]
 # Full-screen cards are easy to read but become monotonous: no more than half
@@ -93,9 +95,13 @@ UI_HINTS = (
     "chatbot", "prompt", "api", "code", "programming", "terminal", "app ",
 )
 DIAGRAM_HINTS = (
-    "diagram", "architecture", "network", "pipeline", "workflow", "process",
-    "how it works", "flowchart", "schematic", "layer",
+    "diagram", "architecture diagram", "architecture routes", "network diagram",
+    "flowchart", "schematic", "routing diagram", "token routing diagram",
+    "mixture of experts token routing diagram", "mixture of experts diagram",
+    "router gating diagram", "expert network architecture diagram",
+    "service layers", "sub-network diagram", "subnetwork diagram",
 )
+
 MAP_HINTS = (
     "map", "geography", "region", "country", "global",
     "worldwide", "grid map", "statewide", "nationwide",
@@ -292,11 +298,17 @@ def _wrap(text: str, width: int = 18, max_lines: int = 3) -> list[str]:
 
 
 def extract_keyword(shot: dict) -> str:
-    """Short, human-meaningful search phrase for stock/still lookup.
+    """Return a coherent subject phrase, never a fragment of narration.
 
-    The explicit ``asset_query`` wins because the script stage already turned a
-    narration beat into subject phrases; raw narration is only a fallback.
+    Structured beat fields take precedence over legacy asset_query values:
+    a query must describe a visible subject/action, not arbitrary prose words.
     """
+    structured = " ".join(str(shot.get(key) or "") for key in (
+        "visual_subject", "beat_subject", "visual_action", "beat_action",
+        "visual_context", "beat_context",
+    )).strip()
+    if structured and len(re.findall(r"[A-Za-z][A-Za-z0-9-]*", structured)) >= 2:
+        return re.sub(r"\s+", " ", structured)[:100]
     raw = " ".join(str(shot.get(key) or "") for key in ("asset_query", "visual"))
     if not raw.strip():
         raw = str(shot.get("claim") or shot.get("caption") or "")
@@ -361,6 +373,11 @@ def _query_candidates(shot: dict, keyword: str) -> list[str]:
         if cleaned.lower() not in {item.lower() for item in candidates}:
             candidates.append(cleaned)
 
+    # Preserve the accepted visual-intent-first ordering from the prior asset
+    # intelligence task, while dropping generic editorial-only wording.
+    intent = str(shot.get("visual_intent") or "")
+    if intent and not re.search(r"\b(ground the narration|support the narration|illustrate the point|hold a claim)\b", intent, re.I):
+        add(intent)
     for variant in shot.get("asset_query_variants") or []:
         add(variant)
     add(str(shot.get("asset_query") or ""))
@@ -384,13 +401,39 @@ def _quantities(text: str) -> list[tuple[str, str]]:
     return found
 
 
+def _explicit_moe_diagram_query(shot: dict) -> bool:
+    """Whether the planner explicitly requests an original MoE mechanism diagram."""
+    query = str(shot.get("asset_query") or shot.get("search_query") or "").lower()
+    narration = str(
+        shot.get("narration") or shot.get("text") or shot.get("claim")
+        or shot.get("caption") or shot.get("visual") or ""
+    ).lower()
+    # A generic MoE search phrase must not turn every beat into a diagram.
+    # Require the narration itself to describe a routing/architecture mechanism.
+    explicit_mechanism = any(
+        term in narration
+        for term in (
+            "router", "routing", "gating", "flowchart", "architecture diagram",
+            "specialist networks", "each token", "whole prompt", "token arrives",
+        )
+    )
+    # Once the narration itself names a concrete routing/selection mechanism,
+    # prefer an original explanatory graphic even if a search-query rewrite
+    # accidentally points at generic hardware footage.
+    return explicit_mechanism
+
+
 def _scene_type(shot: dict, visual_type: str, low: str, quantities: list[tuple[str, str]]) -> str:
     """Map one beat to a concrete visual treatment."""
+    if _explicit_moe_diagram_query(shot):
+        return "diagram"
     if visual_type == "motion_graphic":
         units = [unit for _, unit in quantities if unit]
         repeated_unit = any(units.count(unit) >= 2 for unit in set(units))
         if repeated_unit or any(hint in low for hint in CHART_HINTS):
             return "chart"
+        if any(hint in low for hint in DIAGRAM_HINTS):
+            return "diagram"
         return "typography"
     if any(hint in low for hint in UI_HINTS):
         return "ui_demo"
@@ -405,16 +448,36 @@ def _scene_type(shot: dict, visual_type: str, low: str, quantities: list[tuple[s
 
 def classify_scene(shot: dict) -> dict:
     """Decide how one narration beat should be visualized."""
-    text = str(shot.get("claim") or shot.get("caption") or shot.get("visual") or "")
+    text = str(
+        shot.get("narration") or shot.get("text") or shot.get("claim")
+        or shot.get("caption") or shot.get("visual") or ""
+    )
     low = text.lower()
     quantities = _quantities(text)
     has_number = bool(_first_number(text))
     has_claim = any(hint in low for hint in GRAPHIC_HINTS)
     is_list = bool(re.search(r"(^|\s)(1[.)]|2[.)]|3[.)]|first|second|third)(\s|$)", low))
-    visual_type = "motion_graphic" if (has_number or has_claim or is_list) else "broll"
+    has_architecture = any(hint in low for hint in DIAGRAM_HINTS)
+    # Topic identity must not dictate visual treatment. Classify from the
+    # actual narration beat and its explicit asset query so a technical MoE
+    # explainer can alternate between footage, diagrams and typography.
+    visual_type = "motion_graphic" if (
+        has_number or has_claim or is_list or has_architecture
+        or _explicit_moe_diagram_query(shot)
+    ) else "broll"
+    scene_type = _scene_type(shot, visual_type, low, quantities)
+    explicit_family = str(shot.get("visual_family") or "").strip().lower()
+    family_scene = {
+        "diagram": "diagram", "chart": "chart", "typography": "typography",
+        "ui_demo": "ui_demo", "map": "map", "product": "product",
+        "real_footage": "footage", "footage": "footage",
+    }.get(explicit_family)
+    if family_scene:
+        scene_type = family_scene
+        visual_type = "motion_graphic" if family_scene in {"diagram", "chart", "typography"} else "broll"
     return {
         "visual_type": visual_type,
-        "scene_type": _scene_type(shot, visual_type, low, quantities),
+        "scene_type": scene_type,
         "keyword": extract_keyword(shot),
         "has_number": has_number,
     }
@@ -451,26 +514,56 @@ def build_scene_brief(shot: dict, *, index: int | None = None) -> dict:
     what the beat asks for and which fallbacks are available.
     """
     idx = int(shot.get("index", index if index is not None else 0) or 0)
-    text = str(shot.get("claim") or shot.get("caption") or shot.get("visual") or "")
+    text = str(
+        shot.get("narration") or shot.get("text") or shot.get("claim")
+        or shot.get("caption") or shot.get("visual") or ""
+    )
     caption = _clean_card_text(shot.get("caption") or shot.get("claim") or text)
     number = _first_number(text) or _first_number(caption)
     keyword = extract_keyword(shot)
     queries = _query_candidates(shot, keyword)
     scene = classify_scene(shot)
+    explicit_family = str(shot.get("visual_family") or "").strip().lower()
     if scene["visual_type"] == "motion_graphic":
         fallback_chain = list(GRAPHIC_FALLBACK_CHAIN)
     else:
         fallback_chain = list(BROLL_FALLBACK_CHAIN)
+        if _is_moe_query(keyword, text):
+            # For technical MoE context, a title-matched Commons still is more
+            # reliable than generic stock-video search results. Keep video
+            # providers as fallbacks, but try the verifiable still first.
+            fallback_chain = ["wikimedia", "pixabay", "coverr", "gradient"]
     try:
         duration = max(0.0, float(shot.get("duration") or 0.0))
     except (TypeError, ValueError):
         duration = 0.0
+    visual_purpose = _visual_purpose(scene["scene_type"])
+    if scene["scene_type"] == "footage" and _is_moe_query(keyword, text):
+        if "token arrives" in text.lower():
+            visual_purpose = "Show the transformer architecture that processes incoming tokens."
+        else:
+            visual_purpose = "Show GPU server hardware used to run large language models such as Mixtral."
     return {
         "index": idx,
         "beat_id": shot.get("beat_id") or f"scene-{idx:02d}",
         "intent": _infer_intent(shot, idx),
         "narration": text,
-        "visual_purpose": _visual_purpose(scene["scene_type"]),
+        "visual_subject": str(shot.get("visual_subject") or shot.get("beat_subject") or ""),
+        "visual_action": str(shot.get("visual_action") or shot.get("beat_action") or ""),
+        "visual_context": str(shot.get("visual_context") or shot.get("beat_context") or ""),
+        "visual_family": explicit_family,
+        "shot_size": str(shot.get("shot_size") or "medium"),
+        "camera_angle": str(shot.get("camera_angle") or "eye_level"),
+        "camera_movement": str(shot.get("camera_movement") or "slow_push_in"),
+        "camera_instruction": str(shot.get("camera_instruction") or ""),
+        "lighting_direction": str(shot.get("lighting_direction") or ""),
+        "composition_direction": str(shot.get("composition_direction") or ""),
+        "editing_rhythm": str(shot.get("editing_rhythm") or ""),
+        "transition_intent": str(shot.get("transition_intent") or "cut"),
+        "continuity_group": str(shot.get("continuity_group") or ""),
+        "editorial_reason": str(shot.get("editorial_reason") or ""),
+        "visual_purpose": visual_purpose,
+        "visual_intent": str(shot.get("visual_intent") or visual_purpose),
         "scene_type": scene["scene_type"],
         "visual_type": scene["visual_type"],
         "asset_query": str(shot.get("asset_query") or keyword),
@@ -550,8 +643,19 @@ def _dedupe_query(brief: dict, query_use: dict[str, int],
 def plan_scenes(shots: list[dict]) -> dict:
     """Classify every scene and reserve a stock budget below half the video."""
     total = len(shots)
+    is_moe_plan = any(
+        _is_moe_query(
+            shot.get("narration") or shot.get("text") or shot.get("claim") or "",
+            shot.get("asset_query") or shot.get("search_query") or "",
+        )
+        for shot in shots
+    )
     stock_cap = max(0, (total - 1) // 2)
+    # Technical topics still need editorial variety: diagrams explain the
+    # mechanism, but they must not dominate the entire short. Keep graphics at
+    # or below half the shots and never allow more than two consecutive cards.
     graphic_budget = max(1, total // 2) if total else 0
+    max_graphic_run = MAX_CONSECUTIVE_GRAPHICS
     graphic_count = 0
     graphic_run = 0
     previous_was_recap = False
@@ -583,7 +687,7 @@ def plan_scenes(shots: list[dict]) -> dict:
                 and card_figures
                 and not previous_was_recap
                 and graphic_count < graphic_budget
-                and graphic_run < MAX_CONSECUTIVE_GRAPHICS
+                and graphic_run < max_graphic_run
             ):
                 # Prefer a narration-derived recap over unrelated b-roll.  The
                 # recap shows the real figures already used by earlier beats.
@@ -600,10 +704,55 @@ def plan_scenes(shots: list[dict]) -> dict:
                 graphic_count += 1
                 graphic_run += 1
                 previous_was_recap = True
+            elif duplicate and brief["scene_type"] == "diagram" and _explicit_moe_diagram_query(shot):
+                # A second shot of the same mechanism beat should not trigger a
+                # weak stock search. Use a concise typography interstitial to
+                # break up the diagram while staying grounded in the narration.
+                narration = str(brief.get("narration") or "").lower()
+                if "sparse" in narration or "selected subset" in narration:
+                    title = "ONLY SELECTED EXPERTS"
+                elif "router" in narration or "routing" in narration:
+                    title = "THE ROUTER CHOOSES"
+                elif "token" in narration:
+                    title = "ONE TOKEN AT A TIME"
+                else:
+                    title = "SPECIALIST NETWORKS"
+                brief["visual_type"] = "motion_graphic"
+                brief["scene_type"] = "typography"
+                brief["card_variant"] = "typography"
+                brief["typography_title"] = title
+                brief["visual_purpose"] = _visual_purpose("typography")
+                brief["fallback_chain"] = list(GRAPHIC_FALLBACK_CHAIN)
+                brief["variety_note"] = "typography interstitial breaks up a repeated mechanism diagram"
+                graphic_run = 0
+                previous_was_recap = False
+            elif (
+                is_moe_plan
+                and brief["scene_type"] == "diagram"
+                and _explicit_moe_diagram_query(shot)
+                and graphic_run >= max_graphic_run
+            ):
+                narration = str(brief.get("narration") or "").lower()
+                title = (
+                    "ONLY SELECTED EXPERTS" if "sparse" in narration or "selected subset" in narration
+                    else "THE ROUTER CHOOSES" if "router" in narration or "routing" in narration
+                    else "ONE TOKEN AT A TIME" if "token" in narration
+                    else "SPECIALIST NETWORKS"
+                )
+                brief["scene_type"] = "typography"
+                brief["visual_type"] = "motion_graphic"
+                brief["card_variant"] = "typography"
+                brief["typography_title"] = title
+                brief["visual_purpose"] = _visual_purpose("typography")
+                brief["fallback_chain"] = list(GRAPHIC_FALLBACK_CHAIN)
+                brief["variety_note"] = "mechanism interstitial keeps an explicit MoE beat visual"
+                graphic_count += 1
+                graphic_run = 1
+                previous_was_recap = False
             elif (
                 duplicate
                 or graphic_count >= graphic_budget
-                or graphic_run >= MAX_CONSECUTIVE_GRAPHICS
+                or graphic_run >= max_graphic_run
             ):
                 # Keep the beat, but let real footage carry it instead of another
                 # near-identical card. Captions still show the exact figure.
@@ -611,6 +760,17 @@ def plan_scenes(shots: list[dict]) -> dict:
                 brief["scene_type"] = "footage"
                 brief["visual_purpose"] = _visual_purpose("footage")
                 brief["fallback_chain"] = list(BROLL_FALLBACK_CHAIN)
+                if is_moe_plan:
+                    brief["fallback_chain"] = ["wikimedia", "pixabay", "coverr", "gradient"]
+                    narration = str(brief.get("narration") or "").lower()
+                    if "token arrives" in narration:
+                        brief["visual_purpose"] = "Show the transformer architecture that processes incoming tokens."
+                    else:
+                        brief["visual_purpose"] = "Show GPU server hardware used to run large language models such as Mixtral."
+                    contextual = _moe_context_still_queries(brief, brief.get("search_query") or "")
+                    brief["queries"] = contextual + [q for q in brief.get("queries", []) if q not in contextual]
+                    if contextual:
+                        brief["search_query"] = contextual[0]
                 brief["variety_note"] = (
                     "duplicate card text replaced with b-roll"
                     if duplicate
@@ -825,6 +985,237 @@ def _motion_graphic(shot: dict, work_dir: Path, index: int) -> Path | None:
     return out if out.is_file() and out.stat().st_size > 5000 else None
 
 
+def _moe_diagram_graphic(shot: dict, work_dir: Path, index: int) -> Path | None:
+    """Render an original, narration-safe MoE routing diagram without stock imagery."""
+    if not FONT_PATH.exists():
+        return None
+    text = " ".join(str(shot.get(key) or "") for key in ("topic", "claim", "caption", "visual")).lower()
+    if not any(term in text for term in ("mixture of experts", "expert", "router", "gating", "deepseek", "sub-network", "subnetwork")):
+        return None
+
+    if any(term in text for term in ("limitation", "difficult", "load balance", "load-balancing")):
+        title, subtitle = "MEMORY FOOTPRINT", "SPARSE COMPUTE STILL STORES THE FULL MODEL"
+        footer = "ACTIVE PARAMETERS AND STORED PARAMETERS ARE DIFFERENT"
+    elif "deepseek" in text:
+        title, subtitle = "DEEPSEEK V3", "671B TOTAL  /  37B ACTIVE PARAMETERS"
+        footer = "ILLUSTRATIVE MoE ROUTING FLOW"
+    elif "mixtral" in text:
+        title, subtitle = "MIXTRAL 8x7B", "A SPARSE MIXTURE-OF-EXPERTS MODEL"
+        footer = "CHECK THE MODEL CARD FOR EXACT CONFIGURATION"
+    elif any(term in text for term in ("employee", "company", "email")):
+        title, subtitle = "ONE ROUTER, MANY SPECIALISTS", "NOT EVERY EXPERT ANSWERS EVERY REQUEST"
+        footer = "ROUTING AVOIDS ACTIVATING THE WHOLE MODEL"
+    elif any(term in text for term in ("256 billion", "671 billion", "total parameters", "37 billion", "8 billion")):
+        title, subtitle = "PARAMETER SCALE", "TOTAL CAPACITY IS NOT THE SAME AS ACTIVE COMPUTE"
+        footer = "A SMALLER SUBSET CAN RUN FOR EACH TOKEN"
+    elif any(term in text for term in ("sub-network", "subnetwork", "specialist", "giant")):
+        title, subtitle = "SPECIALIST EXPERTS", "ONE MODEL CAN CONTAIN MANY EXPERT BLOCKS"
+        footer = "ONLY THE SELECTED EXPERTS DO THE WORK"
+    elif any(term in text for term in ("gating", "router")):
+        title, subtitle = "ROUTER / GATING", "SELECTING EXPERTS FOR EACH TOKEN"
+        footer = "ONLY THE SELECTED EXPERTS DO THE WORK"
+    elif any(term in text for term in ("memory", "compute", "research")):
+        title, subtitle = "MODEL SYSTEMS", "SPECIALIZED COMPUTE THROUGH ROUTED EXPERTS"
+        footer = "CONCEPTUAL VIEW OF A SPARSE MODEL"
+    else:
+        title, subtitle = "TOKEN ROUTING", "A ROUTER SELECTS WHICH EXPERTS ACTIVATE"
+        footer = "ONLY THE SELECTED EXPERTS DO THE WORK"
+
+    out = work_dir / f"moe_diagram_{index:03d}.png"
+    filters = [
+        "drawbox=x=72:y=72:w=936:h=1776:color=0x0A1726@0.96:t=fill",
+        "drawbox=x=96:y=96:w=120:h=7:color=0x45D6C5@0.95:t=fill",
+        _left_text_filter("NEXTDECODE  /  AI SYSTEMS", size=28, x=96, y=145, color="white@0.55"),
+        _left_text_filter(title, size=66, x=96, y=250),
+        _left_text_filter(subtitle, size=30, x=100, y=345, color="0x9CB7CC"),
+        "drawbox=x=100:y=430:w=880:h=190:color=0x12283D@0.98:t=fill",
+        "drawbox=x=100:y=430:w=880:h=4:color=0x3B6077@0.9:t=fill",
+        _left_text_filter("INPUT TOKENS", size=28, x=135, y=468, color="0x9CB7CC"),
+        _left_text_filter("TOKEN 01      TOKEN 02      TOKEN 03", size=34, x=135, y=525),
+        "drawbox=x=280:y=730:w=520:h=205:color=0x123C48@0.98:t=fill",
+        "drawbox=x=280:y=730:w=520:h=5:color=0x45D6C5@0.95:t=fill",
+        _left_text_filter("ROUTER / GATING", size=38, x=330, y=790),
+        _left_text_filter("selects a small set of experts", size=28, x=330, y=865, color="0xB5D4D7"),
+        "drawbox=x=536:y=935:w=8:h=115:color=0x45D6C5@0.85:t=fill",
+        "drawbox=x=290:y=1045:w=500:h=7:color=0x45D6C5@0.85:t=fill",
+        "drawbox=x=290:y=1045:w=7:h=70:color=0x45D6C5@0.85:t=fill",
+        "drawbox=x=783:y=1045:w=7:h=70:color=0x45D6C5@0.85:t=fill",
+        "drawbox=x=100:y=1130:w=420:h=220:color=0x104A4B@0.98:t=fill",
+        "drawbox=x=100:y=1130:w=420:h=5:color=0x45D6C5@0.95:t=fill",
+        "drawbox=x=560:y=1130:w=420:h=220:color=0x17283A@0.98:t=fill",
+        "drawbox=x=100:y=1410:w=420:h=220:color=0x17283A@0.98:t=fill",
+        "drawbox=x=560:y=1410:w=420:h=220:color=0x104A4B@0.98:t=fill",
+        "drawbox=x=560:y=1410:w=420:h=5:color=0x45D6C5@0.95:t=fill",
+        _left_text_filter("EXPERT 01", size=42, x=140, y=1180),
+        _left_text_filter("SELECTED", size=27, x=140, y=1260, color="0x45D6C5"),
+        _left_text_filter("EXPERT 02", size=42, x=600, y=1180),
+        _left_text_filter("STANDBY", size=27, x=600, y=1260, color="0x8FA5B8"),
+        _left_text_filter("EXPERT 03", size=42, x=140, y=1460),
+        _left_text_filter("STANDBY", size=27, x=140, y=1540, color="0x8FA5B8"),
+        _left_text_filter("EXPERT 04", size=42, x=600, y=1460),
+        _left_text_filter("SELECTED", size=27, x=600, y=1540, color="0x45D6C5"),
+        # Reserve the lower caption band for kinetic subtitles.  Do not put
+        # essential labels or footers underneath the subtitle layer.
+    ]
+    cmd = [
+        "ffmpeg", "-y", "-f", "lavfi", "-i", _gradient_input(index + 5),
+        "-vf", ",".join(filters), "-frames:v", "1", str(out),
+    ]
+    try:
+        _run(cmd)
+    except Exception:
+        return None
+    return out if out.is_file() and out.stat().st_size > 5000 else None
+
+
+def _moe_context_graphic(shot: dict, work_dir: Path, index: int) -> Path | None:
+    """Draw an original hardware/network illustration for MoE context beats."""
+    if not FONT_PATH.exists():
+        return None
+    beat = str(shot.get("claim") or shot.get("caption") or shot.get("visual") or "").lower()
+    if not any(term in beat for term in (
+        "mixture of experts", "expert", "specialist", "router", "mixtral",
+        "token", "processor", "gpu", "server",
+    )):
+        return None
+
+    if "arrives" in beat or "input" in beat:
+        title, subtitle = "TOKEN ARRIVES", "A NEW INPUT ENTERS THE MODEL"
+        modules = ("TOKEN INPUT", "ROUTER", "EXPERT POOL", "OUTPUT")
+        core = "MODEL CORE"
+    elif "mixtral" in beat or "open weights" in beat:
+        title, subtitle = "MIXTRAL 8x7B", "A SPARSE MIXTURE-OF-EXPERTS MODEL"
+        modules = ("OPEN WEIGHTS", "MODEL LAYERS", "EXPERT POOL", "ROUTER")
+        core = "MODEL CORE"
+    elif "specialist" in beat or "networks" in beat:
+        title, subtitle = "SPECIALIST NETWORKS", "ONE MODEL / MANY SPECIALIST BLOCKS"
+        modules = ("EXPERT 01", "EXPERT 02", "EXPERT 03", "EXPERT 04")
+        core = "SHARED MODEL"
+    else:
+        title, subtitle = "COMPUTE PATH", "FOLLOW THE TOKEN THROUGH THE MODEL"
+        modules = ("TOKEN", "ROUTER", "SELECTED EXPERTS", "OUTPUT")
+        core = "MODEL CORE"
+
+    out = work_dir / f"moe_context_{index:03d}.png"
+    filters = [
+        "drawbox=x=48:y=48:w=984:h=1824:color=0x081522@0.99:t=fill",
+        "drawbox=x=88:y=105:w=130:h=7:color=0x45D6C5@0.98:t=fill",
+        _left_text_filter("NEXTDECODE  /  AI SYSTEMS", size=27, x=88, y=160, color="white@0.58"),
+        _left_text_filter(title, size=62, x=88, y=290),
+        _left_text_filter(subtitle, size=27, x=92, y=370, color="0xA9C2D4"),
+        "drawbox=x=300:y=720:w=480:h=350:color=0x102B3D@0.99:t=fill",
+        "drawbox=x=300:y=720:w=480:h=7:color=0x45D6C5@0.98:t=fill",
+        "drawbox=x=350:y=790:w=380:h=205:color=0x0A1C2A@0.99:t=fill",
+        "drawbox=x=350:y=790:w=380:h=4:color=0x34566D@0.95:t=fill",
+        _left_text_filter(core, size=42, x=385, y=865),
+        _left_text_filter("SPARSE COMPUTE", size=25, x=385, y=935, color="0x45D6C5"),
+        "drawbox=x=535:y=1070:w=10:h=95:color=0x45D6C5@0.95:t=fill",
+        "drawbox=x=220:y=1165:w=640:h=7:color=0x45D6C5@0.95:t=fill",
+        "drawbox=x=220:y=1165:w=7:h=75:color=0x45D6C5@0.95:t=fill",
+        "drawbox=x=853:y=1165:w=7:h=75:color=0x45D6C5@0.95:t=fill",
+    ]
+    positions = ((90, 570), (800, 570), (90, 1270), (800, 1270))
+    for label, (x, y) in zip(modules, positions):
+        filters.extend([
+            f"drawbox=x={x}:y={y}:w=190:h=155:color=0x142A3D@0.99:t=fill",
+            f"drawbox=x={x}:y={y}:w=190:h=5:color=0x45D6C5@0.95:t=fill",
+            _left_text_filter(label, size=25, x=x+18, y=y+67),
+            _left_text_filter("CONNECTED", size=18, x=x+18, y=y+112, color="0x8FA5B8"),
+        ])
+    filters.extend([
+        "drawbox=x=88:y=1575:w=904:h=3:color=0x34566D@0.8:t=fill",
+        _left_text_filter("ILLUSTRATIVE SYSTEM VIEW  /  NOT A BENCHMARK", size=20, x=90, y=1640, color="0x8FA5B8"),
+    ])
+    try:
+        _run(["ffmpeg", "-y", "-f", "lavfi", "-i", _gradient_input(index),
+              "-vf", ",".join(filters), "-frames:v", "1", str(out)])
+    except Exception:
+        return None
+    return out if out.is_file() and out.stat().st_size > 5000 else None
+
+
+def _moe_scene_graphic(shot: dict, work_dir: Path, index: int) -> Path | None:
+    """Create a distinct, evidence-led MoE scene without external image services."""
+    if not FONT_PATH.exists():
+        return None
+    beat = str(shot.get("claim") or shot.get("caption") or shot.get("visual") or "")
+    context = str(shot.get("topic") or "")
+    text = f"{beat} {context}".lower()
+    if not any(term in text for term in ("expert", "router", "mixture of experts", "mixtral", "token routing")):
+        return None
+
+    variant = index % 4
+    if "sparse" in beat.lower():
+        title, subtitle = "SPARSE ROUTING", "ONLY THE SELECTED EXPERTS PROCESS THIS TOKEN"
+        center_label = "ACTIVE EXPERTS"
+    elif "token" in beat.lower():
+        title, subtitle = "TOKEN-BY-TOKEN ROUTING", "THE ROUTER MAKES A CHOICE AT EACH LAYER"
+        center_label = "ROUTER / GATING"
+    elif "mixture" in beat.lower() or "pool" in beat.lower():
+        title, subtitle = "MIXTURE OF EXPERTS", "ONE MODEL / A POOL OF SPECIALIST NETWORKS"
+        center_label = "EXPERT POOL"
+    elif "router" in beat.lower():
+        title, subtitle = "THE ROUTER DECIDES", "TWO EXPERTS ARE SELECTED FOR EACH TOKEN"
+        center_label = "ROUTER / GATING"
+    else:
+        title, subtitle = "EXPERT ROUTING", "A SMALL SUBSET HANDLES THE TOKEN"
+        center_label = "SELECTED PATH"
+
+    # Rotate the highlighted pair so adjacent scenes show different routing paths.
+    selected = {index % 8, (index + 3) % 8}
+    filters = [
+        "drawbox=x=48:y=48:w=984:h=1824:color=0x081522@0.98:t=fill",
+        "drawbox=x=88:y=100:w=120:h=7:color=0x45D6C5@0.98:t=fill",
+        _left_text_filter("NEXTDECODE  /  AI SYSTEMS", size=27, x=88, y=155, color="white@0.55"),
+        _left_text_filter(title, size=58, x=88, y=265),
+        _left_text_filter(subtitle, size=27, x=92, y=345, color="0xA9C2D4"),
+        "drawbox=x=110:y=440:w=860:h=150:color=0x12283D@0.98:t=fill",
+        "drawbox=x=110:y=440:w=860:h=4:color=0x34566D@0.9:t=fill",
+        _left_text_filter("INPUT", size=24, x=145, y=475, color="0x8EA8BC"),
+        _left_text_filter("TOKEN 01       TOKEN 02       TOKEN 03", size=34, x=145, y=530),
+        "drawbox=x=300:y=665:w=480:h=150:color=0x123C48@0.98:t=fill",
+        "drawbox=x=300:y=665:w=480:h=5:color=0x45D6C5@0.98:t=fill",
+        _left_text_filter(center_label, size=38, x=345, y=710),
+        _left_text_filter("selects a small expert subset", size=24, x=345, y=770, color="0xB5D4D7"),
+        "drawbox=x=536:y=815:w=8:h=65:color=0x45D6C5@0.95:t=fill",
+        "drawbox=x=300:y=880:w=480:h=7:color=0x45D6C5@0.95:t=fill",
+    ]
+    # Eight distinct expert nodes; two active nodes change between scenes.
+    for expert in range(8):
+        col = expert % 2
+        row = expert // 2
+        x = 110 + col * 460
+        y = 930 + row * 132
+        active = expert in selected
+        fill = "0x104A4B@0.99" if active else "0x142638@0.99"
+        accent = "0x45D6C5@0.98" if active else "0x334A60@0.9"
+        state = "SELECTED" if active else "AVAILABLE"
+        state_color = "0x45D6C5" if active else "0x8FA5B8"
+        filters.extend([
+            f"drawbox=x={x}:y={y}:w=410:h=108:color={fill}:t=fill",
+            f"drawbox=x={x}:y={y}:w=410:h=4:color={accent}:t=fill",
+            _left_text_filter(f"EXPERT {expert + 1:02d}", size=31, x=x+24, y=y+28),
+            _left_text_filter(state, size=21, x=x+24, y=y+72, color=state_color),
+        ])
+    filters.extend([
+        "drawbox=x=110:y=1510:w=860:h=130:color=0x12283D@0.98:t=fill",
+        "drawbox=x=110:y=1510:w=860:h=4:color=0x45D6C5@0.95:t=fill",
+        _left_text_filter("COMBINED OUTPUT", size=34, x=145, y=1545),
+        _left_text_filter("Selected expert outputs return to the model", size=23, x=145, y=1600, color="0xA9C2D4"),
+        _left_text_filter("ILLUSTRATIVE ROUTING VIEW  /  NOT A BENCHMARK CHART", size=19, x=112, y=1690, color="white@0.42"),
+    ])
+    out = Path(work_dir) / f"moe_scene_{index:03d}.png"
+    command = [
+        "ffmpeg", "-y", "-f", "lavfi", "-i", _gradient_input(index + 17),
+        "-vf", ",".join(filters), "-frames:v", "1", str(out),
+    ]
+    try:
+        _run(command)
+    except Exception:
+        return None
+    return out if out.is_file() and out.stat().st_size > 5000 else None
+
+
 # ---------------------------------------------------------------------------
 # Provider: gradient + caption fallback (no API, no prompt text)
 # ---------------------------------------------------------------------------
@@ -861,7 +1252,8 @@ def _gradient_caption(shot: dict, work_dir: Path, index: int) -> Path | None:
 # Provider: Pixabay videos (24h keyword cache)
 # ---------------------------------------------------------------------------
 def _cache_path(keyword: str) -> Path:
-    digest = hashlib.sha1(keyword.lower().encode("utf-8")).hexdigest()[:16]
+    normalized = " ".join(str(keyword or "").lower().split())
+    digest = hashlib.sha256(f"pixabay-video-v2:{normalized}".encode("utf-8")).hexdigest()[:20]
     return CACHE_DIR / f"{digest}.json"
 
 
@@ -906,7 +1298,11 @@ def _pixabay_hits(keyword: str) -> list[dict]:
             continue
         hits.append({
             "id": hit.get("id"),
-            "tags": str(hit.get("tags") or "")[:160],
+            "title": str(hit.get("title") or "")[:180],
+            "description": str(hit.get("description") or "")[:500],
+            "tags": str(hit.get("tags") or "")[:500],
+            "page_url": str(hit.get("pageURL") or ""),
+            "author": str(hit.get("user") or "")[:120],
             "duration": float(hit.get("duration") or 0),
             "width": int(chosen.get("width") or 0),
             "height": int(chosen.get("height") or 0),
@@ -937,9 +1333,12 @@ GENERIC_STYLE_TERMS = frozenset({
 # Wikimedia titles such as "Performance Measurement - Grassroots Development"
 # can share two of these while showing something unrelated.
 GENERIC_SUBJECT_TERMS = frozenset({
-    "software", "development", "performance", "programming", "coding", "code",
-    "data", "system", "systems", "project", "team", "teams", "work", "worker",
+    "software", "development", "performance", "programming",
+    "system", "systems", "project", "team", "teams", "work", "worker",
     "office", "measurement", "process", "management", "technology", "computer",
+    "one", "two", "three", "these", "giant", "lightweight", "machine", "learning",
+    "laboratory", "architecture", "diagram", "network", "building", "city", "modern",
+    "company", "manager",
 })
 
 
@@ -959,6 +1358,38 @@ def _content_terms(*texts: object) -> set[str]:
                 terms.add(word[:-1])
             else:
                 terms.add(word + "s")
+    return terms
+
+
+def _is_moe_query(*texts: object) -> bool:
+    joined = " ".join(str(text or "").lower() for text in texts)
+    return any(term in joined for term in ("mixture of experts", "expert routing", "expert", "router", "gating", "token routing", "deepseek", "sub-network", "subnetwork"))
+
+
+def _moe_context_still_queries(scene: dict, keyword: str) -> list[str]:
+    """Use precise, Commons-searchable context queries when stock APIs are absent."""
+    narration = " ".join(str(scene.get(key) or "") for key in (
+        "narration", "claim", "caption", "visual", "beat_label"
+    )).lower()
+    if not _is_moe_query(keyword, narration):
+        return []
+    if any(term in narration for term in ("specialist", "network")):
+        return ["neural network", "artificial neural network"]
+    if any(term in narration for term in ("token", "router", "routing", "layer")):
+        return ["transformer architecture", "neural network"]
+    return ["GPU server", "data center"]
+
+
+def _specific_terms(*texts: object) -> set[str]:
+    """Return distinct, non-generic subject terms for strict asset matching."""
+    terms: set[str] = set()
+    excluded = STOPWORDS | GENERIC_SUBJECT_TERMS
+    for text in texts:
+        for word in re.findall(r"[a-z0-9]+", str(text or "").lower()):
+            word = word[:-1] if word.endswith("s") and len(word) > 3 else word
+            if len(word) <= 2 or word in excluded:
+                continue
+            terms.add(word)
     return terms
 
 
@@ -998,20 +1429,40 @@ def validate_asset_relevance(scene: dict, asset: dict) -> dict:
     visual_type = str(asset.get("visual_type") or scene.get("visual_type") or "broll")
     fallback_reason = str(asset.get("fallback_reason") or "")
     narration = str(scene.get("narration") or "")
+    visual_intent = str(
+        scene.get("visual_intent") or scene.get("visual_purpose")
+        or scene.get("intent") or ""
+    )
     query = str(asset.get("query") or scene.get("search_query") or scene.get("keyword") or "")
     title = str(asset.get("title") or "")
+    description = str(asset.get("description") or "")
     tags = str(asset.get("tags") or "")
+    metadata_text = " ".join(
+        str(asset.get(key) or "")
+        for key in ("author", "username", "category", "alt", "source_title", "source_url")
+    )
 
     narration_terms = _content_terms(narration)
+    intent_terms = _content_terms(visual_intent)
     # Compare against the query that actually produced this asset, not every
-    # alternate query in the scene.  Using all variants dilutes the overlap and
-    # marks clearly tag-related clips as low confidence.
+    # alternate query in the scene. Include the explicit visual intent so a
+    # broad topic query cannot outweigh what this exact beat asks the viewer to see.
     query_terms = _content_terms(query, scene.get("keyword"))
-    asset_terms = _content_terms(title, tags)
+    asset_terms = _content_terms(title, description, tags, metadata_text)
     matched_query = sorted(query_terms & asset_terms)
     matched_narration = sorted(narration_terms & asset_terms)
     query_overlap = _term_overlap(query_terms, asset_terms)
     narration_overlap = _term_overlap(narration_terms, asset_terms)
+    specific_query_terms = _specific_terms(query, scene.get("keyword"))
+    semantic_title = "" if title.lower().startswith("pixabay clip ") else title
+    specific_asset_terms = _specific_terms(semantic_title, description, tags, asset.get("source_url"))
+    matched_specific = sorted(specific_query_terms & specific_asset_terms)
+    specific_overlap = _term_overlap(specific_query_terms, specific_asset_terms)
+    intent_overlap = _term_overlap(intent_terms, asset_terms)
+    relevance_score = round(
+        min(1.0, query_overlap * 0.35 + intent_overlap * 0.40 + narration_overlap * 0.25),
+        3,
+    )
 
     if provider == "motion_graphic":
         return {
@@ -1044,49 +1495,73 @@ def validate_asset_relevance(scene: dict, asset: dict) -> dict:
         }
 
     if provider == "pixabay":
-        if asset_terms:
-            if query_overlap >= 0.5 and len(matched_query) >= 2:
-                confidence = "medium"
-                reason = "tags share multiple query terms (lexical, not semantic)"
-            elif query_overlap >= MIN_TAG_OVERLAP or narration_overlap >= 0.34:
-                confidence = "medium"
-                reason = "tags share at least one query/narration term (lexical, not semantic)"
-            else:
-                confidence = "low"
-                reason = "tags do not clearly match the narration/query terms"
+        if _is_moe_query(query, scene.get("keyword")):
+            confidence = "medium" if len(matched_specific) >= 2 and specific_overlap >= MIN_TAG_OVERLAP else "low"
+            reason = "two topic-specific terms match (lexical only); semantic review still required" if confidence == "medium" else "MoE asset lacks two topic-specific tag matches"
+        elif not asset_terms:
+            confidence, reason = "medium", "provider returned a result but tag/title metadata is unavailable; human review required"
+        elif not specific_query_terms:
+            confidence, reason = "low", "query contains only generic terms and cannot establish subject relevance"
+        elif len(specific_query_terms) <= 2 and len(matched_specific) >= 1 and specific_overlap >= MIN_TAG_OVERLAP:
+            confidence, reason = "medium", "concrete subject terms match metadata (lexical only)"
+        elif len(matched_specific) >= 2 and specific_overlap >= MIN_TAG_OVERLAP:
+            confidence, reason = "medium", "multiple beat-specific subject terms match metadata (lexical only)"
         else:
-            confidence = "medium"
-            reason = "provider returned a result for the query; tags unavailable"
+            confidence, reason = "low", "tags do not clearly match the narration/query terms"
         return {
             "relevance_confidence": confidence,
             "semantic_review": True,
             "relevance_reason": reason,
-            "matched_terms": sorted(set(matched_query) | set(matched_narration)),
-            "review_reason": "stock tag overlap is lexical and needs visual review",
+            "matched_terms": sorted(set(matched_query) | set(matched_narration) | set(matched_specific)),
+            "relevance_score": relevance_score,
+            "intent_overlap": round(intent_overlap, 3),
+            "review_reason": "stock metadata overlap is lexical and needs visual review",
         }
 
-    if provider == "pexels":
-        return {
-            "relevance_confidence": "medium",
-            "semantic_review": True,
-            "relevance_reason": "provider orientation/query filter only; tags unavailable",
-            "matched_terms": sorted(set(matched_query) | set(matched_narration)),
-            "review_reason": "orientation-filtered stock needs visual review",
-        }
-
-    if provider == "wikimedia":
-        if asset_terms and (query_overlap >= 0.5 or narration_overlap >= 0.34):
-            confidence = "medium"
-            reason = "title/query lexical match; image content not verified"
+    if provider == "coverr":
+        if _is_moe_query(query, scene.get("keyword")):
+            confidence = "medium" if len(matched_specific) >= 2 else "low"
+            reason = "title shares two MoE-specific terms; semantic review still required" if confidence == "medium" else "Coverr title lacks two MoE-specific terms"
+        elif not asset_terms:
+            confidence, reason = "low", f"{provider} returned no subject metadata to verify the query"
+        elif len(specific_query_terms) <= 2 and len(matched_specific) >= 1 and specific_overlap >= MIN_TAG_OVERLAP:
+            confidence, reason = "medium", "concrete subject terms match metadata (lexical only)"
+        elif len(matched_specific) >= 2 and specific_overlap >= MIN_TAG_OVERLAP:
+            confidence, reason = "medium", "multiple beat-specific subject terms match metadata (lexical only)"
         else:
-            confidence = "low"
-            reason = "title/query match is weak or ambiguous"
+            confidence, reason = "low", f"{provider} metadata does not support this narration beat or visual intent"
         return {
             "relevance_confidence": confidence,
             "semantic_review": True,
             "relevance_reason": reason,
-            "matched_terms": sorted(set(matched_query) | set(matched_narration)),
-            "review_reason": "still title match needs visual review",
+            "matched_terms": sorted(set(matched_query) | set(matched_narration) | set(matched_specific)),
+            "relevance_score": relevance_score,
+            "intent_overlap": round(intent_overlap, 3),
+            "review_reason": "stock metadata match needs visual review",
+        }
+
+    if provider in {"wikimedia", "openverse"}:
+        if _is_moe_query(query, scene.get("keyword")):
+            confidence = "medium" if len(matched_specific) >= 2 and specific_overlap >= MIN_TAG_OVERLAP else "low"
+            reason = "title/query shares two MoE-specific terms; image content not verified" if confidence == "medium" else "MoE title match lacks two topic-specific terms"
+        elif not asset_terms:
+            confidence, reason = "medium", f"{provider} still metadata unavailable; human review required"
+        elif not specific_query_terms:
+            confidence, reason = "low", "query contains only generic terms and cannot establish subject relevance"
+        elif len(specific_query_terms) <= 2 and len(matched_specific) >= 1 and specific_overlap >= MIN_TAG_OVERLAP:
+            confidence, reason = "medium", f"{provider} title/description matches concrete subject terms (lexical only)"
+        elif len(matched_specific) >= 2 and specific_overlap >= MIN_TAG_OVERLAP:
+            confidence, reason = "medium", f"{provider} title/description matches multiple beat-specific terms (lexical only)"
+        else:
+            confidence, reason = "low", f"{provider} title/query match is weak or ambiguous"
+        return {
+            "relevance_confidence": confidence,
+            "semantic_review": True,
+            "relevance_reason": reason,
+            "matched_terms": sorted(set(matched_query) | set(matched_narration) | set(matched_specific)),
+            "relevance_score": relevance_score,
+            "intent_overlap": round(intent_overlap, 3),
+            "review_reason": f"{provider} still requires visual and licence review",
         }
 
     if provider in {"ai_image", "gemini", "fal", "replicate", "openai", "pollinations", "cloudflare"}:
@@ -1107,14 +1582,17 @@ def validate_asset_relevance(scene: dict, asset: dict) -> dict:
     }
 
 
-def _pick_hit(hits: list[dict], keyword: str, *, used_ids: set[str] | None = None) -> dict | None:
+def _pick_hit(hits: list[dict], keyword: str, *, used_ids: set[str] | None = None, scene: dict | None = None) -> dict | None:
     """Rank stock clips by tag overlap, vertical crop safety and quality.
 
     Assets already used by another scene are skipped so adjacent shots do not
     repeat the same clip.  A clip must share at least half of the query terms
     with its tags; otherwise a vertical, unrelated clip would win on geometry.
     """
-    terms = set(re.findall(r"[a-z0-9]+", keyword.lower()))
+    strict_topic_query = _is_moe_query(keyword)
+    terms = _specific_terms(keyword) if strict_topic_query else set(re.findall(r"[a-z0-9]+", keyword.lower()))
+    if not terms:
+        return None
     used = {str(item) for item in (used_ids or set())}
     best, best_score = None, -1.0
     for hit in hits:
@@ -1126,9 +1604,17 @@ def _pick_hit(hits: list[dict], keyword: str, *, used_ids: set[str] | None = Non
         height = int(hit.get("height") or 0)
         if duration < STOCK_CLIP_SECONDS or width <= 0 or height <= 0:
             continue
-        tags = set(re.findall(r"[a-z0-9]+", str(hit.get("tags") or "").lower()))
-        overlap = (len(terms & tags) / len(terms)) if terms else 0.0
-        if overlap < MIN_TAG_OVERLAP:
+        metadata = " ".join(str(hit.get(key) or "") for key in ("title", "description", "tags", "category"))
+        tags = _specific_terms(metadata) if strict_topic_query else set(re.findall(r"[a-z0-9]+", metadata.lower()))
+        matched = terms & tags
+        overlap = (len(matched) / len(terms)) if terms else 0.0
+        intent_text = " ".join(str((scene or {}).get(key) or "") for key in ("visual_intent", "visual_purpose"))
+        narration_text = str((scene or {}).get("narration") or "")
+        intent_terms = _specific_terms(intent_text)
+        narration_terms = _specific_terms(narration_text)
+        intent_match = _term_overlap(intent_terms, tags)
+        narration_match = _term_overlap(narration_terms, tags)
+        if (len(matched) < 2 if strict_topic_query else overlap < MIN_TAG_OVERLAP):
             continue
         ratio = width / height
         target = 9 / 16
@@ -1137,7 +1623,8 @@ def _pick_hit(hits: list[dict], keyword: str, *, used_ids: set[str] | None = Non
         resolution = min(width, 1920) / 1920
         duration_fit = min(duration, 12.0) / 12.0
         score = (
-            overlap * 3.0 + ratio_fit * 2.0 + vertical * 1.0
+            overlap * 3.0 + intent_match * 1.5 + narration_match * 0.75
+            + ratio_fit * 2.0 + vertical * 1.0
             + resolution * 0.5 + duration_fit * 0.5
         )
         if score > best_score:
@@ -1222,8 +1709,8 @@ def _visual_quality(path: Path) -> tuple[str, dict]:
 
 
 def _pixabay_asset(keyword: str, work_dir: Path, index: int, *,
-                   used_ids: set[str] | None = None) -> dict | None:
-    hit = _pick_hit(_pixabay_hits(keyword), keyword, used_ids=used_ids)
+                   used_ids: set[str] | None = None, scene: dict | None = None) -> dict | None:
+    hit = _pick_hit(_pixabay_hits(keyword), keyword, used_ids=used_ids, scene=scene)
     if not hit:
         return None
     raw = work_dir / f"pixabay_src_{index:03d}.mp4"
@@ -1236,7 +1723,10 @@ def _pixabay_asset(keyword: str, work_dir: Path, index: int, *,
     return {
         "path": str(out),
         "provider": "pixabay",
-        "title": f"Pixabay clip {hit.get('id')}",
+        "title": str(hit.get("title") or f"Pixabay clip {hit.get('id')}"),
+        "description": str(hit.get("description") or ""),
+        "author": str(hit.get("author") or ""),
+        "source_url": str(hit.get("page_url") or ""),
         "license": "Pixabay Content License",
         "query": keyword,
         "duration": STOCK_CLIP_SECONDS,
@@ -1250,70 +1740,62 @@ def _pixabay_asset(keyword: str, work_dir: Path, index: int, *,
 
 
 # ---------------------------------------------------------------------------
-# Provider slot: Pexels videos (only when PEXELS_API_KEY is set)
+# Provider slot: Coverr videos (configured key; bounded free/demo quota)
 # ---------------------------------------------------------------------------
-def _pexels_asset(keyword: str, work_dir: Path, index: int, *,
-                  used_ids: set[str] | None = None) -> dict | None:
-    key = _env("PEXELS_API_KEY")
-    if not key:
+def _coverr_asset(keyword: str, work_dir: Path, index: int, *,
+                  used_ids: set[str] | None = None, scene: dict | None = None) -> dict | None:
+    if not _env("COVERR_API_KEY"):
         return None
-    url = "https://api.pexels.com/videos/search?" + urllib.parse.urlencode({
-        "query": keyword[:100], "orientation": "portrait", "per_page": "5",
-    })
     try:
-        request = urllib.request.Request(url, headers={"Authorization": key, "User-Agent": USER_AGENT})
-        with urllib.request.urlopen(request, timeout=20) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+        from app.providers.media_sources import search_coverr_videos
+        hits = search_coverr_videos(keyword, limit=8, orientation="vertical")
     except Exception as exc:
-        print(f"[visual] pexels search unavailable ({type(exc).__name__})")
+        print(f"[visual] coverr search unavailable ({type(exc).__name__})")
         return None
-
     used = {str(item) for item in (used_ids or set())}
-    candidates: list[tuple[float, str, object, float]] = []
-    for video in payload.get("videos") or []:
-        video_id = video.get("id")
-        asset_id = f"pexels:{video_id}"
-        if asset_id in used:
+    intent_terms = _specific_terms(
+        str((scene or {}).get("visual_intent") or (scene or {}).get("visual_purpose") or "")
+    )
+    narration_terms = _specific_terms(str((scene or {}).get("narration") or ""))
+    ranked = []
+    for hit in hits:
+        asset_id = f"coverr:{hit.get('id')}"
+        if not hit.get("id") or asset_id in used or not hit.get("download_url"):
             continue
-        best_link, best_file_score = None, -1.0
-        for item in video.get("video_files") or []:
-            width = int(item.get("width") or 0)
-            height = int(item.get("height") or 0)
-            link = item.get("link")
-            if not link or width <= 0 or height <= 0:
-                continue
-            ratio = width / height
-            score = 2.0 - abs(ratio - 9 / 16) * 3 + min(height, 1920) / 1920
-            if score > best_file_score:
-                best_link, best_file_score = link, score
-        if not best_link:
-            continue
-        duration = float(video.get("duration") or 0)
-        total = best_file_score + min(duration, 20.0) / 40.0
-        candidates.append((total, best_link, video_id, duration))
-    if not candidates:
+        metadata = " ".join([
+            str(hit.get("title") or ""), str(hit.get("description") or ""),
+            " ".join(str(tag) for tag in hit.get("tags") or []),
+        ])
+        terms = _specific_terms(metadata)
+        score = _term_overlap(intent_terms, terms) * 1.5 + _term_overlap(narration_terms, terms) * 0.75
+        ranked.append((score, hit))
+    if not ranked:
         return None
-    score, best, video_id, _duration = max(candidates, key=lambda item: (item[0], str(item[2])))
-
-    raw = work_dir / f"pexels_src_{index:03d}.mp4"
-    if not _download_file(best, raw):
+    score, hit = max(ranked, key=lambda item: (item[0], str(item[1].get("id"))))
+    source = str(hit.get("download_url") or "")
+    parsed = urllib.parse.urlparse(source)
+    if parsed.scheme != "https" or not parsed.netloc:
         return None
-    out = _prepare_clip(raw, work_dir / f"stock_pexels_{index:03d}.mp4")
+    raw = work_dir / f"coverr_src_{index:03d}.mp4"
+    if not _download_file(source, raw):
+        return None
+    out = _prepare_clip(raw, work_dir / f"stock_coverr_{index:03d}.mp4")
     if not out:
         return None
     quality, luma = _visual_quality(out)
+    tags = hit.get("tags") or []
     return {
-        "path": str(out),
-        "provider": "pexels",
-        "title": f"Pexels clip {video_id}",
-        "license": "Pexels License",
-        "query": keyword,
-        "duration": STOCK_CLIP_SECONDS,
-        "asset_id": f"pexels:{video_id}",
-        "relevance": "provider_orientation_filter",
-        "rank_score": round(score, 3),
-        "visual_quality": quality,
-        "luma": luma,
+        "path": str(out), "provider": "coverr",
+        "title": str(hit.get("title") or f"Coverr clip {hit.get('id')}"),
+        "description": str(hit.get("description") or ""),
+        "author": str(hit.get("creator") or hit.get("author") or ""),
+        "source_url": str(hit.get("source_url") or ""),
+        "license": str(hit.get("license") or "Coverr API terms; verify item terms"),
+        "attribution_required": bool(hit.get("attribution_required", True)),
+        "query": keyword, "tags": " ".join(str(tag) for tag in tags),
+        "duration": STOCK_CLIP_SECONDS, "asset_id": f"coverr:{hit.get('id')}",
+        "relevance": "coverr_metadata_match", "rank_score": score,
+        "visual_quality": quality, "luma": luma,
     }
 
 
@@ -1339,22 +1821,34 @@ def _wikimedia_asset(shot: dict, keyword: str, work_dir: Path, index: int,
     asset = dict(asset)
     asset.setdefault("provider", "wikimedia")
     asset["query"] = asset.get("query") or keyword
-    title = str(asset.get("title") or asset.get("page_url") or index)
+    title = " ".join(str(asset.get(key) or "") for key in ("title", "object_name", "description", "page_url", "source_url")).strip() or str(index)
     # Reject broad word overlap that does not identify the subject.  Example:
     # query "software development performance" matched a still titled
     # "Performance Measurement - Grassroots Development Programme".
-    query_terms = _content_terms(asset["query"], keyword)
-    title_terms = _content_terms(title)
-    shared = query_terms & title_terms
-    specific = {
-        term for term in shared
-        if term not in GENERIC_SUBJECT_TERMS
-        and term.rstrip("s") not in GENERIC_SUBJECT_TERMS
-    }
-    if shared and not specific:
+    if _is_moe_query(asset["query"], keyword):
+        query_terms = _content_terms(asset["query"])
+        title_terms = _content_terms(title)
+        specific = _specific_terms(asset["query"], keyword) & _specific_terms(title)
+        query_coverage = len(query_terms & title_terms) / max(1, len(query_terms))
+        # Commons titles often say "Neural Network" or "Transformer Architecture".
+        # One non-generic anchor is enough when the selected search phrase itself
+        # has a strong title match; requiring two non-generic words discarded these
+        # useful, on-topic technical visuals because "network" is generic globally.
+        rejected = len(specific) < 1 or query_coverage < 0.8
+    else:
+        query_terms = _content_terms(asset["query"], keyword)
+        title_terms = _content_terms(title)
+        shared = query_terms & title_terms
+        specific = {
+            term for term in shared
+            if term not in GENERIC_SUBJECT_TERMS
+            and term.rstrip("s") not in GENERIC_SUBJECT_TERMS
+        }
+        rejected = bool(shared and not specific)
+    if rejected:
         print(
             f"[visual] wikimedia still rejected for '{keyword}': "
-            f"only generic title terms {sorted(shared)[:4]}"
+            f"insufficient topic-specific title match {sorted(specific)[:4]}"
         )
         return None
     asset.setdefault("asset_id", f"wikimedia:{title}")
@@ -1368,14 +1862,94 @@ def _wikimedia_asset(shot: dict, keyword: str, work_dir: Path, index: int,
 
 
 # ---------------------------------------------------------------------------
+# Provider: Openverse openly licensed stills (keyless, licence-aware)
+# ---------------------------------------------------------------------------
+def _openverse_asset(shot: dict, keyword: str, work_dir: Path, index: int,
+                     used_titles: set[str] | None = None) -> dict | None:
+    try:
+        from app.providers.media_sources import search_openverse_images
+        hits = search_openverse_images(keyword, limit=10)
+    except Exception as exc:
+        print(f"[visual] Openverse search unavailable ({type(exc).__name__})")
+        return None
+    used = {str(value).lower() for value in (used_titles or set())}
+    intent_terms = _specific_terms(str(shot.get("visual_intent") or shot.get("visual_purpose") or ""))
+    narration_terms = _specific_terms(str(shot.get("narration") or shot.get("claim") or ""))
+    ranked = []
+    for hit in hits:
+        if hit.get("mature") or not hit.get("commercial_use"):
+            continue
+        title = str(hit.get("title") or "")
+        asset_id = str(hit.get("id") or "")
+        if not asset_id or asset_id.lower() in used or not hit.get("media_url"):
+            continue
+        metadata = _specific_terms(title, str(hit.get("creator") or ""))
+        score = _term_overlap(intent_terms, metadata) * 1.5 + _term_overlap(narration_terms, metadata) * 0.75
+        ranked.append((score, hit))
+    if not ranked:
+        return None
+    score, hit = max(ranked, key=lambda item: (item[0], str(item[1].get("id"))))
+    media_url = str(hit.get("media_url") or "")
+    parsed = urllib.parse.urlparse(media_url)
+    if parsed.scheme != "https" or not parsed.netloc:
+        return None
+    suffix = Path(parsed.path).suffix.lower()
+    if suffix not in {".jpg", ".jpeg", ".png", ".webp"}:
+        suffix = ".jpg"
+    raw = work_dir / f"openverse_src_{index:03d}{suffix}"
+    if not _download_file(media_url, raw) or not raw.is_file() or raw.stat().st_size < 5000:
+        return None
+    try:
+        out = work_dir / f"stock_openverse_{index:03d}.mp4"
+        vf = f"scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=increase,crop={WIDTH}:{HEIGHT},setsar=1,fps={FPS}"
+        _run(["ffmpeg", "-y", "-loop", "1", "-i", str(raw), "-t", str(STOCK_CLIP_SECONDS), "-vf", vf, "-an", "-c:v", "libx264", "-preset", "fast", "-crf", "23", "-pix_fmt", "yuv420p", str(out)])
+        if not out.is_file() or out.stat().st_size <= 50000:
+            return None
+    except Exception:
+        return None
+    quality, luma = _visual_quality(out)
+    return {
+        "path": str(out), "provider": "openverse",
+        "title": str(hit.get("title") or ""),
+        "description": str(hit.get("attribution") or ""),
+        "author": str(hit.get("creator") or ""),
+        "source_url": str(hit.get("source_url") or ""),
+        "license": str(hit.get("license") or ""),
+        "license_version": str(hit.get("license_version") or ""),
+        "license_url": str(hit.get("license_url") or ""),
+        "attribution": str(hit.get("attribution") or ""),
+        "attribution_required": bool(hit.get("requires_attribution", True)),
+        "license_review_required": True,
+        "query": keyword, "asset_id": f"openverse:{hit.get('id')}",
+        "relevance": "openverse_metadata_match", "rank_score": score,
+        "visual_quality": quality, "luma": luma,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Provider: AI image (only with a configured keyed provider)
 # ---------------------------------------------------------------------------
 def _ai_configured() -> bool:
-    keys = ("POLLINATIONS_API_KEY", "GEMINI_API_KEY", "FAL_KEY",
-            "REPLICATE_API_TOKEN", "OPENAI_API_KEY")
-    if any(_env(name) for name in keys):
+    """Check configured image providers, including opt-in keyless Pollinations."""
+    selected = _env("VISUAL_PROVIDER").lower()
+    image_fallback = _env("AI_IMAGE_FALLBACK").lower()
+    if image_fallback in {"0", "false", "no", "off"}:
+        return False
+    if selected in {"off", "none", "local", "wikimedia"}:
+        return False
+    if any(_env(name) for name in (
+        "GEMINI_API_KEY", "FAL_KEY", "REPLICATE_API_TOKEN", "OPENAI_API_KEY",
+    )):
         return True
-    return bool(_env("CF_ACCOUNT_ID") and _env("CF_API_TOKEN"))
+    if _env("CF_ACCOUNT_ID") and _env("CF_API_TOKEN"):
+        return True
+    # Keyless Pollinations is supported by the adapter, but must be explicitly
+    # enabled so a default run never makes an unexpected external image request.
+    return (
+        selected == "pollinations"
+        or _env("IMAGE_PROVIDER").lower() == "pollinations"
+        or _env("POLLINATIONS_ENABLED").lower() in {"1", "true", "yes"}
+    )
 
 
 def _ai_asset(shot: dict, keyword: str, work_dir: Path) -> dict | None:
@@ -1405,6 +1979,172 @@ def _ai_asset(shot: dict, keyword: str, work_dir: Path) -> dict | None:
 # ---------------------------------------------------------------------------
 # Resolution
 # ---------------------------------------------------------------------------
+def _load_registered_generated_video(shot: dict, work_dir: Path, keyword: str) -> dict | None:
+    """Load an explicitly selected generated clip only after provenance checks.
+
+    This resolver never calls a generation API. A shot opts in through
+    generated_video_asset, set to a media path or its .asset.json sidecar.
+    """
+    import hashlib
+    import json
+
+    reference = str(shot.get('generated_video_asset') or '').strip()
+    if not reference:
+        return None
+    candidate = Path(reference).expanduser()
+    if not candidate.is_absolute():
+        candidate = (Path(work_dir) / candidate).resolve()
+    if candidate.name.endswith('.asset.json'):
+        sidecar = candidate
+        media = Path(str(candidate)[:-len('.asset.json')])
+    else:
+        media = candidate
+        sidecar = media.with_suffix(media.suffix + '.asset.json')
+    if not media.is_file() or not sidecar.is_file():
+        raise ValueError('generated asset or provenance sidecar is missing')
+    record = json.loads(sidecar.read_text(encoding='utf-8'))
+    if record.get('schema') != 'nextdecode.generated-video-asset.v1':
+        raise ValueError('unsupported generated asset provenance schema')
+    if record.get('status') != 'qualified' or not record.get('requires_editorial_review', True):
+        raise ValueError('generated asset is not qualified for editorial review')
+    if not record.get('provider') or not record.get('task_id') or not record.get('model'):
+        raise ValueError('generated asset provider/model/task provenance is incomplete')
+    if Path(str(record.get('local_path') or '')).resolve() != media.resolve():
+        raise ValueError('generated asset sidecar path does not match selected media')
+    digest = hashlib.sha256(media.read_bytes()).hexdigest()
+    if not record.get('sha256') or digest != record.get('sha256'):
+        raise ValueError('generated asset SHA-256 mismatch')
+    from app.providers.video_generation_workflow import _probe_video
+    probed = _probe_video(media)
+    declared = record.get('metadata') or {}
+    for key in ('width', 'height', 'size_bytes'):
+        if int(declared.get(key) or 0) != int(probed.get(key) or 0):
+            raise ValueError(f'generated asset {key} metadata mismatch')
+    duration = float(probed.get('duration_seconds') or 0)
+    if duration <= 0 or not probed.get('width') or not probed.get('height'):
+        raise ValueError('generated asset media probe is incomplete')
+    return {
+        'path': str(media.resolve()), 'provider': 'generated_video',
+        'title': str(record.get('model') or 'Generated video'),
+        'description': str(record.get('prompt') or ''), 'query': keyword,
+        'license': 'provider_generated; verify provider terms before publication',
+        'asset_id': 'generated:{}:{}'.format(record.get('provider'), record.get('task_id')),
+        'media_type': 'video', 'duration': duration,
+        'generated_provenance': {
+            'provider': record.get('provider'), 'model': record.get('model'),
+            'task_id': record.get('task_id'), 'run_id': record.get('run_id'),
+            'sidecar_path': str(sidecar.resolve()), 'sha256': digest,
+            'metadata': probed, 'requires_editorial_review': True,
+        },
+        'relevance': 'prompt_generated_unreviewed', 'fallback_reason': '',
+    }
+
+
+def _registered_generated_video(shot: dict, work_dir: Path, keyword: str) -> dict | None:
+    try:
+        return _load_registered_generated_video(shot, work_dir, keyword)
+    except Exception as exc:
+        print(f"[visual] generated asset rejected for scene {shot.get('index', '?')}: {type(exc).__name__}")
+        # Invalid optional generated media must not poison the shot. Continue
+        # through the same stock/local visual fallback chain as any miss.
+        return None
+
+
+
+
+def _local_component_asset(shot: dict, scene: dict, work_dir: Path, index: int) -> dict | None:
+    """Create a topic-aware, original vector visual when licensed footage is absent."""
+    narration = str(shot.get("claim") or shot.get("caption") or scene.get("narration") or "").strip()
+    topic = str(shot.get("topic") or scene.get("topic") or "").strip()
+    subject = str(scene.get("visual_subject") or scene.get("subject") or shot.get("visual_subject") or shot.get("visual") or topic).strip()
+    action = str(scene.get("visual_action") or scene.get("action") or shot.get("visual_action") or shot.get("action") or "").strip()
+    combined = f"{topic} {subject} {narration} {action}".lower()
+    work_dir = Path(work_dir)
+    component_dir = work_dir / "components"
+    component_dir.mkdir(parents=True, exist_ok=True)
+    svg_path = component_dir / f"scene_{index:03d}.svg"
+    png_path = component_dir / f"scene_{index:03d}.png"
+
+    scene_type = str(scene.get("scene_type") or "").lower()
+    if any(term in combined for term in ("protomaps", "pmtiles", "map tiles", "vector tiles", "map server", "cdn")) and scene_type == "diagram":
+        spec = {
+            "kind": "flow_diagram",
+            "title": "How self-hosted map tiles work",
+            "nodes": [
+                {"title": "PMTiles archive", "detail": "Vector map tiles stored in one portable file"},
+                {"title": "CDN storage", "detail": "Serve the archive from edge infrastructure"},
+                {"title": "Map client", "detail": "Request only the map data needed for the view"},
+            ],
+        }
+    elif any(term in combined for term in ("protomaps", "pmtiles", "map tiles", "vector tiles", "map server", "cdn")):
+        spec = {
+            "kind": "icon_tile",
+            "symbol": "chip",
+            "title": "Self-hosted map tiles",
+            "caption": (narration or action or "Vector map data served from your own infrastructure")[:90],
+        }
+    elif any(term in combined for term in ("research agent", "ai agent", "open-ended research")):
+        spec = {
+            "kind": "flow_diagram",
+            "title": "The research-agent loop",
+            "nodes": [
+                {"title": "Research question", "detail": "Define the problem and evidence target"},
+                {"title": "Agent exploration", "detail": "Search, test hypotheses and run analysis"},
+                {"title": "Human evaluation", "detail": "Check results, limits and reproducibility"},
+            ],
+        }
+    elif any(term in combined for term in ("workflow", "steps", "process", "mechanism", "system", "architecture")):
+        spec = {
+            "kind": "flow_diagram",
+            "title": (subject or topic or "How it works")[:54],
+            "nodes": [
+                {"title": "Input", "detail": narration[:92] or subject[:92]},
+                {"title": "Mechanism", "detail": action[:92] or "Process the input through the described system"},
+                {"title": "Outcome", "detail": "Review the result against the evidence and intended use"},
+            ],
+        }
+    else:
+        spec = {
+            "kind": "icon_tile",
+            "symbol": "chip" if any(x in combined for x in ("technology", "software", "computer", "server")) else "spark",
+            "title": (subject or topic or "Key idea")[:48],
+            "caption": (narration or action or topic)[:90],
+        }
+
+    try:
+        render_scene_component({
+            "visual_source": "vector_component",
+            "scene_id": f"scene_{index:03d}",
+            "narration": narration,
+            "component": spec,
+        }, svg_path)
+        completed = subprocess.run(
+            ["ffmpeg", "-y", "-v", "error", "-i", str(svg_path), "-frames:v", "1", str(png_path)],
+            capture_output=True, timeout=30,
+        )
+        if completed.returncode != 0 or not png_path.is_file() or png_path.stat().st_size < 1024:
+            return None
+    except Exception:
+        return None
+    return {
+        "path": str(png_path),
+        "provider": "motion_graphic",
+        "title": spec.get("title", ""),
+        "asset_id": f"local:vector-component:{index}",
+        "card_variant": spec.get("kind", "vector_component"),
+        "scene_type": "diagram" if spec.get("kind") == "flow_diagram" else "typography",
+        "visual_type": "motion_graphic",
+        "relevance": "narration_derived",
+        "relevance_confidence": "high",
+        "semantic_review": False,
+        "review_reason": "",
+        "relevance_reason": "original local vector component generated from the narration beat",
+        "fallback_reason": "no sufficiently relevant licensed visual asset; used original local graphic",
+        "generated_locally": True,
+        "external_api_used": False,
+    }
+
+
 def resolve_scene(shot: dict, work_dir: Path, planner: dict, *,
                   used_titles: set[str] | None = None,
                   dry_run: bool = False) -> dict:
@@ -1423,6 +2163,9 @@ def resolve_scene(shot: dict, work_dir: Path, planner: dict, *,
     keyword = scene.get("keyword") or extract_keyword(shot)
     query = scene.get("search_query") or keyword
     queries = list(scene.get("queries") or [query])
+    if not dry_run:
+        contextual_queries = _moe_context_still_queries(scene, keyword)
+        queries = contextual_queries + [item for item in queries if item not in contextual_queries]
     used_ids = planner.setdefault("used_asset_ids", set())
     reasons: list[str] = []
 
@@ -1438,23 +2181,81 @@ def resolve_scene(shot: dict, work_dir: Path, planner: dict, *,
         detail.setdefault("attempts", list(reasons))
         validation = validate_asset_relevance(scene, detail)
         detail.update(validation)
-        if detail.get("provider") in {"pixabay", "pexels", "wikimedia", "ai_image"}:
+        if detail.get("provider") == "generated_video":
+            detail.update({
+                "relevance_confidence": "medium", "semantic_review": True,
+                "review_reason": "generated footage has not received a visual/editorial review",
+                "relevance_reason": "prompt provenance verified; visual semantics remain unverified",
+                "visual_quality": "unreviewed",
+            })
+        if detail.get("provider") in {"pixabay", "coverr", "wikimedia", "openverse"} and validation.get("relevance_confidence") == "low":
+            reasons.append(
+                f"{detail.get('provider', 'stock')} candidate rejected: "
+                f"{validation.get('relevance_reason') or 'weak topic-specific match'}"
+            )
+            return None
+        if detail.get("provider") in {"pixabay", "coverr", "wikimedia", "openverse", "ai_image"}:
+            vision_enabled = False
             try:
                 from app.visuals import vision_review
+                vision_enabled = vision_review.enabled()
                 vision = vision_review.review_asset(scene, detail)
             except Exception as exc:
                 vision = {"checked": False, "reason": f"vision review unavailable ({type(exc).__name__})"}
             detail["vision_review"] = vision
             if vision.get("checked"):
                 verdict = str(vision.get("relevance") or "medium")
+                visual_quality = str(vision.get("quality") or "unknown")
                 detail["relevance_confidence"] = verdict
-                detail["semantic_review"] = verdict != "high"
+                detail["visual_quality"] = visual_quality
+                detail["semantic_review"] = verdict != "high" or visual_quality == "low"
                 detail["relevance_reason"] = f"vision review: {vision.get('reason', '')}"
                 detail["review_reason"] = (
-                    "" if verdict == "high" else "vision review requested human confirmation"
+                    "low visual quality" if visual_quality == "low"
+                    else "" if verdict == "high"
+                    else "vision review requested human confirmation"
                 )
+                if verdict != "high" or visual_quality == "low":
+                    reasons.append(
+                        f"{detail.get('provider', 'visual')} candidate rejected by vision review: "
+                        f"{verdict} relevance, {visual_quality} visual quality; "
+                        f"{vision.get('reason') or 'insufficient visual support'}"
+                    )
+                    return None
+            elif vision_enabled:
+                reasons.append(
+                    f"{detail.get('provider', 'visual')} candidate rejected because configured "
+                    f"vision review was unavailable: {vision.get('reason') or 'no verdict'}"
+                )
+                return None
+        if detail.get("provider") in {"pixabay", "coverr", "wikimedia", "openverse"}:
+            previous = next(reversed(planner.get("resolved") or []), None)
+            previous_path = Path(str((previous or {}).get("asset_path") or ""))
+            current_path = Path(str(detail.get("path") or ""))
+            if (
+                previous
+                and previous.get("provider") in {"pixabay", "coverr", "wikimedia", "openverse"}
+                and int(previous.get("index", -2)) == index - 1
+                and previous_path.is_file()
+                and current_path.is_file()
+            ):
+                try:
+                    from app.visuals.asset_qa import _dhash
+                    previous_hash = _dhash(previous_path, seek_seconds=float(previous.get("duration_seconds") or 0) / 2)
+                    current_hash = _dhash(current_path, seek_seconds=float(detail.get("duration") or 0) / 2)
+                    if previous_hash is not None and current_hash is not None:
+                        distance = (previous_hash ^ current_hash).bit_count()
+                        if distance <= 3:
+                            reasons.append(f"candidate rejected: adjacent composition too similar (dHash distance {distance})")
+                            return None
+                except Exception:
+                    # Composition QA is advisory when FFmpeg cannot decode a frame;
+                    # provenance and semantic review remain mandatory.
+                    pass
         planner.setdefault("resolved", []).append({
             "index": index,
+            "asset_path": str(detail.get("path") or ""),
+            "duration_seconds": detail.get("duration"),
             "scene_type": scene_type,
             "visual_type": visual_type,
             "provider": detail.get("provider"),
@@ -1471,21 +2272,79 @@ def resolve_scene(shot: dict, work_dir: Path, planner: dict, *,
         })
         return detail
 
+    # Generated media is never invoked here: only a pre-generated, explicitly
+    # selected sidecar can be registered for the existing editorial review gate.
+    if shot.get("generated_video_asset"):
+        try:
+            generated = _registered_generated_video(shot, work_dir, keyword)
+        except Exception as exc:
+            reasons.append("generated asset rejected: {}".format(type(exc).__name__))
+            generated = None
+        if generated:
+            _log_scene(index, visual_type, "registered generated video", keyword)
+            accepted = resolved(generated)
+            if accepted is not None:
+                return accepted
+            reasons.append("registered generated clip could not pass editorial/provenance registration")
+
+    # A topic match is not a visual instruction.  Only render the MoE diagram
+    # for beats explicitly classified as diagrams; forcing every supporting
+    # sentence through this branch caused the same graphic to fill the entire
+    # video and overrode the planner's b-roll/typography variety decisions.
+    if scene_type == "diagram" and (
+        visual_type == "motion_graphic" or scene.get("intent") == "mechanism"
+    ):
+        diagram = _moe_scene_graphic(shot, work_dir, index) or _moe_diagram_graphic(shot, work_dir, index)
+        if diagram:
+            _log_scene(index, "motion_graphic", "local MoE diagram", keyword)
+            return resolved({
+                "path": str(diagram),
+                "provider": "motion_graphic",
+                "visual_type": "motion_graphic",
+                "scene_type": "diagram",
+                "title": "MoE routing diagram",
+                "card_variant": "moe_diagram",
+                "asset_id": f"local:moe-diagram:{index}",
+                "relevance": "narration_derived",
+                "relevance_confidence": "high",
+                "semantic_review": False,
+                "relevance_reason": "original diagram generated from this narration beat",
+                "fallback_reason": "",
+            })
+
     if visual_type == "motion_graphic":
         if scene.get("card_variant") == "recap":
             card = _recap_graphic(
                 shot, work_dir, index, list(scene.get("recap_figures") or [])
             )
             card_variant = "recap"
+        elif scene.get("card_variant") == "typography":
+            graphic_shot = dict(shot)
+            title = str(scene.get("typography_title") or "KEY MECHANISM")
+            graphic_shot["claim"] = title
+            graphic_shot["caption"] = title
+            card = _motion_graphic(graphic_shot, work_dir, index)
+            card_variant = "typography"
         else:
             card = _motion_graphic(shot, work_dir, index)
             card_variant = "number"
         if card:
             _log_scene(index, visual_type, "local card", keyword)
-            return resolved({
+            detail = {
                 "path": str(card), "provider": "motion_graphic", "title": "",
                 "card_variant": card_variant,
-            })
+            }
+            if card_variant == "typography":
+                detail.update({
+                    "scene_type": "typography",
+                    "visual_type": "motion_graphic",
+                    "asset_id": f"local:moe-typography:{index}",
+                    "relevance": "narration_derived",
+                    "relevance_confidence": "high",
+                    "semantic_review": False,
+                    "relevance_reason": "original typography interstitial derived from the narration beat",
+                })
+            return resolved(detail)
         reasons.append("local card render failed")
 
     if not dry_run:
@@ -1493,15 +2352,15 @@ def resolve_scene(shot: dict, work_dir: Path, planner: dict, *,
             if not scene.get("allow_stock"):
                 reasons.append("stock budget reserved for non-b-roll scenes")
             elif planner.get("stock_used", 0) < planner.get("stock_cap", 0):
-                providers = (("pixabay", _pixabay_asset), ("pexels", _pexels_asset))
+                providers = (("pixabay", _pixabay_asset), ("coverr", _coverr_asset))
                 tried = False
                 for provider, fetch in providers:
-                    key_name = "PIXABAY_API_KEY" if provider == "pixabay" else "PEXELS_API_KEY"
+                    key_name = "PIXABAY_API_KEY" if provider == "pixabay" else "COVERR_API_KEY"
                     if not _env(key_name):
                         continue
                     tried = True
                     for candidate in queries[:2]:
-                        asset = fetch(candidate, work_dir, index, used_ids=used_ids)
+                        asset = fetch(candidate, work_dir, index, used_ids=used_ids, scene=scene)
                         if not asset:
                             continue
                         asset.update({
@@ -1522,13 +2381,16 @@ def resolve_scene(shot: dict, work_dir: Path, planner: dict, *,
                                     f"weak lexical match for '{candidate}' skipped"
                                 )
                             continue
+                        _log_scene(index, visual_type, provider, candidate)
+                        accepted = resolved(asset)
+                        if accepted is None:
+                            continue
                         planner["stock_used"] = planner.get("stock_used", 0) + 1
                         if asset.get("asset_id"):
                             used_ids.add(str(asset["asset_id"]))
-                        _log_scene(index, visual_type, provider, candidate)
-                        return resolved(asset)
+                        return accepted
                 if not tried:
-                    reasons.append("no stock video provider configured")
+                    reasons.append("no configured stock video provider (Pixabay/Coverr)")
                 else:
                     reasons.append("no unused stock video matched")
             else:
@@ -1544,8 +2406,25 @@ def resolve_scene(shot: dict, work_dir: Path, planner: dict, *,
                     "keyword": keyword,
                     "fallback_reason": "",
                 })
-                return resolved(still)
+                accepted = resolved(still)
+                if accepted is not None:
+                    return accepted
             reasons.append("no unused Wikimedia still matched")
+
+            openverse = None
+            if _env("OPENVERSE_ENABLED").lower() in {"1", "true", "yes", "on"}:
+                openverse = _openverse_asset(shot, keyword, work_dir, index, used_titles)
+            if openverse:
+                openverse.update({
+                    "visual_type": visual_type,
+                    "scene_type": scene_type,
+                    "keyword": keyword,
+                    "fallback_reason": "",
+                })
+                accepted = resolved(openverse)
+                if accepted is not None:
+                    return accepted
+                reasons.append("Openverse still rejected by relevance/visual review")
 
             if _ai_configured():
                 ai = _ai_asset(shot, keyword, work_dir)
@@ -1557,14 +2436,61 @@ def resolve_scene(shot: dict, work_dir: Path, planner: dict, *,
                         "keyword": keyword,
                         "fallback_reason": "",
                     })
-                    return resolved(ai)
-                reasons.append("AI image provider failed")
+                    accepted = resolved(ai)
+                    if accepted is not None:
+                        return accepted
+                    reasons.append("AI image candidate rejected by visual review")
+                else:
+                    reasons.append("AI image provider failed")
             else:
                 reasons.append("AI image provider not configured")
     else:
         reasons.append("dry run: network providers skipped")
 
     reason = "; ".join(reasons) or "no visual provider available"
+    topic_text = str(shot.get("topic") or "").lower()
+    is_moe_topic = any(term in topic_text for term in ("mixture of experts", "few experts", "expert routing", "mixtral", "moe"))
+    narration_text = str(
+        shot.get("claim") or shot.get("caption") or shot.get("visual") or ""
+    ).lower()
+    context_visual_is_grounded = any(
+        term in narration_text
+        for term in (
+            "token arrives", "open weights", "specialist networks",
+            "gpu", "server", "processor", "hardware", "compute",
+            "parameter", "memory", "chip",
+        )
+    )
+    if (
+        is_moe_topic
+        and scene_type in {"footage", "ui_demo", "product"}
+        and context_visual_is_grounded
+    ):
+        context_graphic = _moe_context_graphic(shot, work_dir, index)
+        if context_graphic:
+            scene = {**scene, "scene_type": "diagram", "visual_purpose": _visual_purpose("diagram")}
+            scene_type = "diagram"
+            visual_type = "motion_graphic"
+            return resolved({
+                "path": str(context_graphic),
+                "provider": "motion_graphic",
+                "title": "",
+                "asset_id": f"local:moe-context:{index}",
+                "card_variant": "context",
+                "scene_type": "diagram",
+                "visual_type": "motion_graphic",
+                "relevance": "narration_derived",
+                "relevance_confidence": "high",
+                "semantic_review": False,
+                "review_reason": "",
+                "relevance_reason": "original local hardware/network illustration derived from the narration",
+                "fallback_reason": "",
+            })
+    component_asset = _local_component_asset(shot, scene, work_dir, index)
+    if component_asset:
+        _log_scene(index, "motion_graphic", "original local vector component", keyword)
+        return resolved(component_asset)
+
     fallback = _gradient_caption(shot, work_dir, index)
     if fallback:
         print(f"[visual] scene {index:02d} {visual_type} -> gradient caption (fallback: {reason})")

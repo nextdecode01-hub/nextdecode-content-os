@@ -11,6 +11,38 @@ from unittest.mock import patch
 from app.publish import artifact_snapshot, social_orchestrator as social
 
 
+def _authorized_receipt(platform, video_sha256, purpose="short"):
+    """Full-shape WP5 protected-action receipt mirroring authorize_publish.
+
+    verify_protected_action_decision enforces the receipt's scope keys, the
+    canonical binding fields and the derived authorization_id, so the fake
+    must satisfy the same contract a real receipt does.
+    """
+    from app.publish import authorization as authorization_module
+    decision = {
+        "policy_version": authorization_module.POLICY_VERSION,
+        "status": "authorized",
+        "action_type": "publish",
+        "platform": str(platform),
+        "purpose": purpose,
+        "destination": "private",
+        "public_release": None,
+        "approved_at": "2026-11-06T00:00:00+00:00",
+        "reviewer": "test-reviewer",
+        "metadata_sha256": "c" * 64,
+        "video_sha256": video_sha256,
+    }
+    binding_fields = (
+        "policy_version", "action_type", "platform", "purpose", "destination",
+        "approved_at", "reviewer", "metadata_sha256", "video_sha256",
+    )
+    decision["authorization_id"] = hashlib.sha256(
+        json.dumps({key: decision[key] for key in binding_fields},
+                   sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return decision
+
+
 class SocialOrchestratorIntegrityTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -30,7 +62,7 @@ class SocialOrchestratorIntegrityTests(unittest.TestCase):
         self.snapshot_root.start()
         self.auth = patch(
             "app.publish.authorization.authorize_publish",
-            return_value={"video_sha256": self.digest},
+            side_effect=lambda *, platform, **_kwargs: _authorized_receipt(platform, self.digest),
         )
         self.auth.start()
         self.addCleanup(self.auth.stop)

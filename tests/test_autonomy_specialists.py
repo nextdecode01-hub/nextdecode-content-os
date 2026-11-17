@@ -223,3 +223,34 @@ def test_script_specialist_bounds_model_context_to_two_verified_sources(tmp_path
         "outputs/autonomy/artifacts/research.json", hashlib.sha256(raw).hexdigest()
     )
     assert [item["title"] for item in sources] == ["Source 0", "Source 1"]
+
+
+def test_specialist_artifact_verification_binds_studio_provenance(tmp_path, monkeypatch):
+    artifact_dir = tmp_path / "outputs" / "autonomy" / "artifacts"
+    artifact_dir.mkdir(parents=True)
+    envelope = {
+        "schema_version": "nextdecode.autonomy-artifact.v1",
+        "artifact_id": "a" * 32,
+        "run_id": "b" * 32,
+        "artifact_type": "research-brief",
+        "human_review_status": "pending",
+        "external_actions_allowed": False,
+        "studio_provenance": {
+            "studio_version_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "studio_content_sha256": "c" * 64,
+        },
+        "payload": {"sources": [{"url": "https://example.com"}]},
+    }
+    raw = json.dumps(envelope, sort_keys=True).encode()
+    path = artifact_dir / "research.json"
+    path.write_bytes(raw)
+    monkeypatch.setattr(tasks, "ROOT", tmp_path)
+    output = {
+        "artifact_path": "outputs/autonomy/artifacts/research.json",
+        "artifact_sha256": hashlib.sha256(raw).hexdigest(),
+        "artifact_type": "research-brief", "artifact_id": "a" * 32, "run_id": "b" * 32,
+        **envelope["studio_provenance"],
+    }
+    assert tasks._verified_artifact(output) == (True, None)
+    output["studio_content_sha256"] = "d" * 64
+    assert tasks._verified_artifact(output) == (False, "artifact_studio_provenance_mismatch")

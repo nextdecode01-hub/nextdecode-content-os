@@ -136,6 +136,59 @@ class PromotionWindowTests(unittest.TestCase):
         self.assertEqual(journal["status"], "failed")
         self.assertEqual(tracker.manifest["promotion"]["status"], "failed")
 
+    def test_complete_promotion_rejects_manifest_redirected_journal(self):
+        tracker = _new_tracker(self.root)
+        self._seed_artifacts(tracker)
+        tracker.begin_promotion({"video": "abc123"})
+        outside = self.root / "outside.json"
+        outside.write_text('{"run_id":"other","status":"promoting"}', encoding="utf-8")
+        tracker.manifest["promotion"]["journal_path"] = str(outside)
+        with self.assertRaisesRegex(RuntimeError, "does not match this run"):
+            tracker.complete_promotion()
+        self.assertEqual(outside.read_text(encoding="utf-8"), '{"run_id":"other","status":"promoting"}')
+
+    def test_mark_failed_never_writes_to_redirected_journal(self):
+        tracker = _new_tracker(self.root)
+        self._seed_artifacts(tracker)
+        tracker.begin_promotion({"video": "abc123"})
+        outside = self.root / "outside.json"
+        sentinel = '{"run_id":"other","status":"promoting"}'
+        outside.write_text(sentinel, encoding="utf-8")
+        tracker.manifest["promotion"]["journal_path"] = str(outside)
+        tracker.mark_failed(stage="promotion", exc=RuntimeError("failed"))
+        self.assertEqual(outside.read_text(encoding="utf-8"), sentinel)
+        self.assertEqual(tracker.manifest["promotion"]["status"], "failed")
+
+    def test_begin_promotion_rejects_external_journal_path(self):
+        tracker = _new_tracker(self.root)
+        outside = self.root / "outside.json"
+        with self.assertRaisesRegex(RuntimeError, "does not match this run"):
+            tracker.begin_promotion({"video": "abc123"}, journal_path=outside)
+        self.assertFalse(outside.exists())
+
+    def test_begin_promotion_rejects_symlinked_journal_directory(self):
+        tracker = _new_tracker(self.root)
+        external = self.root / "external-promotions"
+        external.mkdir()
+        promotions = tracker.index_path.parent / "promotions"
+        promotions.parent.mkdir(parents=True, exist_ok=True)
+        promotions.symlink_to(external, target_is_directory=True)
+        with self.assertRaisesRegex(RuntimeError, "must not be a symlink"):
+            tracker.begin_promotion({"video": "abc123"})
+        self.assertEqual(list(external.iterdir()), [])
+
+    def test_begin_promotion_rejects_symlinked_journal_file(self):
+        tracker = _new_tracker(self.root)
+        promotions = tracker.index_path.parent / "promotions"
+        promotions.mkdir(parents=True)
+        external = self.root / "outside-journal.json"
+        sentinel = '{"run_id":"other","status":"promoting"}'
+        external.write_text(sentinel, encoding="utf-8")
+        (promotions / f"{tracker.run_id}.json").symlink_to(external)
+        with self.assertRaisesRegex(RuntimeError, "must not be a symlink"):
+            tracker.begin_promotion({"video": "abc123"})
+        self.assertEqual(external.read_text(encoding="utf-8"), sentinel)
+
     def test_double_promotion_window_is_refused(self):
         tracker = _new_tracker(self.root)
         self._seed_artifacts(tracker)

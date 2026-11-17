@@ -66,7 +66,7 @@ def test_rank_topics_reports_drops_instead_of_hiding_them(capsys):
             patch.object(selector, "load_used_topics", return_value=[]):
         scored = selector.rank_topics(candidates)
     assert scored == []
-    assert "dropped 1 Wikipedia/Wikimedia discovery candidate" in capsys.readouterr().out
+    assert "dropped 1 ineligible discovery candidate" in capsys.readouterr().out
 
 
 def test_only_wikipedia_candidates_yields_no_selection(tmp_path):
@@ -96,3 +96,16 @@ def test_fetch_all_filters_wikipedia_from_aggregated_results():
     assert titles == {"NIST page"}
     assert "wikipedia_filter" in result["errors"]
     assert "excluded from discovery" in result["errors"]["wikipedia_filter"]
+
+@pytest.mark.parametrize("candidate", [
+    {"title": "Coffeehouses and the Rise of Science [pdf]", "source": "google_news"},
+    {"title": "Research paper PDF download", "source": "hackernews"},
+    {"title": "A research topic", "url": "https://example.org/files/paper.pdf", "source": "arxiv"},
+])
+def test_topic_selector_rejects_document_download_artifacts(candidate):
+    assert selector.is_discovery_excluded(candidate)
+
+
+def test_topic_selector_keeps_real_topics_about_pdf_or_research():
+    assert not selector.is_discovery_excluded({"title": "How PDF compression works", "source": "hackernews"})
+    assert not selector.is_discovery_excluded({"title": "AI research changes drug discovery", "source": "google_news"})

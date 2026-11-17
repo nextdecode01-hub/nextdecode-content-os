@@ -3,7 +3,7 @@
 
 Features
 --------
-* Route script JSON requests through OmniRoute, Gemini, Groq, then local Ollama.
+* Route script JSON requests through the active hosted providers only.
 * Keep optional direct-provider CLI calls for Groq, OpenAI, Anthropic, Gemini, and Ollama.
 * Optionally track/enforce estimated daily API-token budgets with ENABLE_TOKEN_BUDGET=true.
 * CLI for quick ad‑hoc prompts.
@@ -28,7 +28,6 @@ from typing import Any
 from dotenv import load_dotenv
 import requests
 
-from . import omniroute_client
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(PROJECT_ROOT / ".env")
@@ -47,10 +46,9 @@ DAILY_TOKEN_LIMITS = {
     "openai": 1_000_000,
     "anthropic": 1_000_000,
     "gemini": 10_000_000,
-    "ollama": float("inf"),
 }
 TOKEN_USAGE_PATH = PROJECT_ROOT / "data" / "token_usage.json"
-PROVIDER_ORDER = ("omniroute", "gemini", "groq", "pollinations_text", "nvidia", "cloudflare", "openrouter", "mistral", "cerebras", "ollama")
+PROVIDER_ORDER = ("gemini", "groq", "pollinations_text", "nvidia", "cloudflare", "zai", "openrouter", "mistral", "cerebras")
 
 # Free fallback providers (OpenAI-compatible endpoints)
 POLLINATIONS_TEXT_URL = os.getenv("POLLINATIONS_TEXT_URL", "https://text.pollinations.ai/openai").strip().rstrip("/")
@@ -105,7 +103,8 @@ def gemini_model_chain() -> list[str]:
 
 
 def _health_gate_enabled() -> bool:
-    return os.getenv("AI_HEALTH_GATE", "false").strip().lower() == "true"
+    # Recent explicit failures are skipped by default; stale/missing health is unknown, not unhealthy.
+    return os.getenv("AI_HEALTH_GATE", "true").strip().lower() == "true"
 
 
 def _unhealthy(provider: str) -> bool:
@@ -114,7 +113,17 @@ def _unhealthy(provider: str) -> bool:
     try:
         from . import model_health
 
-        return model_health.should_skip(provider)
+        return model_health.should_skip(provider) or model_health.quota_threshold_reached(provider, threshold=0.90)
+    except Exception:
+        return False
+
+
+def _model_quota_blocked(provider: str, model: str) -> bool:
+    if not _health_gate_enabled() or os.getenv("AI_IGNORE_HEALTH") == "1":
+        return False
+    try:
+        from . import model_health
+        return model_health.quota_threshold_reached(provider, model=model, threshold=0.90)
     except Exception:
         return False
 
@@ -126,13 +135,14 @@ def _autonomy_local_only() -> bool:
 
 def _provider_order() -> list[str]:
     if _autonomy_local_only():
-        return ["ollama"]
+        # Local Ollama was retired; autonomy mode must fail closed rather than silently use a hosted provider.
+        return []
     raw = os.getenv("AI_PROVIDER_CHAIN", "").strip()
-    if not raw:
-        return list(PROVIDER_ORDER)
-    order = [item.strip().lower() for item in raw.split(",") if item.strip()]
-    for provider in PROVIDER_ORDER:
-        if provider not in order:
+    requested = [item.strip().lower() for item in raw.split(",") if item.strip()] if raw else []
+    # Preserve owner-configured priority while rejecting unknown names and duplicates.
+    order: list[str] = []
+    for provider in [*requested, *PROVIDER_ORDER]:
+        if provider in PROVIDER_ORDER and provider not in order:
             order.append(provider)
     return order
 
@@ -150,8 +160,54 @@ def _save_token_usage(data: dict) -> None:
 def _reset_if_new_day(usage: dict) -> dict:
     today = datetime.now(timezone.utc).date().isoformat()
     if usage.get("date") != today:
-        usage = {"date": today, "counts": {"groq": 0, "openai": 0, "anthropic": 0, "gemini": 0, "ollama": 0}}
+        usage = {"date": today, "counts": {"groq": 0, "openai": 0, "anthropic": 0, "gemini": 0}}
     return usage
+
+MODEL_USAGE_PATH = PROJECT_ROOT / "data" / "model_usage.v1.json"
+
+
+def _record_model_usage(provider: str, model: str, usage: dict | None = None) -> None:
+    """Persist actual usage metadata when a provider returns it; never estimate quota."""
+    if not usage:
+        return
+    record = {
+        "input_tokens": _usage_value(usage, "prompt_tokens", "input_tokens", "prompt_token_count"),
+        "output_tokens": _usage_value(usage, "completion_tokens", "output_tokens", "candidates_token_count"),
+        "total_tokens": _usage_value(usage, "total_tokens", "total_token_count"),
+    }
+    if not record["total_tokens"]:
+        record["total_tokens"] = record["input_tokens"] + record["output_tokens"]
+    if not record["total_tokens"]:
+        return
+    try:
+        data = json.loads(MODEL_USAGE_PATH.read_text(encoding="utf-8")) if MODEL_USAGE_PATH.exists() else {"schema": "nextdecode.model-usage.v1", "models": {}}
+        key = f"{provider}:{model}"
+        current = data.setdefault("models", {}).setdefault(key, {"provider": provider, "model": model, "total_tokens": 0, "input_tokens": 0, "output_tokens": 0, "requests": 0})
+        for field in ("input_tokens", "output_tokens", "total_tokens"):
+            current[field] += int(record[field] or 0)
+        current["requests"] += 1
+        data["updated_at"] = datetime.now(timezone.utc).isoformat()
+        temp = MODEL_USAGE_PATH.with_suffix(".tmp")
+        temp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        temp.replace(MODEL_USAGE_PATH)
+    except (OSError, ValueError, TypeError):
+        return
+
+
+def _record_provider_quota(provider: str, model: str, headers: dict) -> None:
+    path = PROJECT_ROOT / "data" / "provider_quota.v1.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {"schema": "nextdecode.provider-quota.v1", "providers": {}}
+        record = data.setdefault("providers", {}).setdefault(provider, {"provider": provider, "models": {}})
+        record.setdefault("models", {})[model] = {"source": "response_headers", "headers": headers, "checked_at": datetime.now(timezone.utc).isoformat()}
+        record["checked_at"] = datetime.now(timezone.utc).isoformat()
+        data["updated_at"] = datetime.now(timezone.utc).isoformat()
+        temp = path.with_suffix(".tmp")
+        temp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        temp.replace(path)
+    except (OSError, ValueError, TypeError):
+        return
+
 
 def _increment_usage(provider: str, tokens: int) -> None:
     if not ENABLE_TOKEN_BUDGET:
@@ -212,6 +268,9 @@ def call_groq(
     models = groq_model_chain() if model is None else [model]
     errors: list[str] = []
     for candidate in models:
+        if _model_quota_blocked("groq", candidate):
+            errors.append(f"{candidate} quota_threshold_90pct")
+            continue
         request = dict(
             model=candidate,
             messages=[{"role": "user", "content": prompt}],
@@ -222,12 +281,21 @@ def call_groq(
             request["response_format"] = {"type": "json_object"}
         for attempt in range(2):
             try:
-                response = client.chat.completions.create(**request)
+                raw_response = client.chat.completions.with_raw_response.create(**request)
+                response = raw_response.parse()
+                quota_headers = {}
+                for key in ("x-ratelimit-limit-requests", "x-ratelimit-remaining-requests", "x-ratelimit-reset-requests", "x-ratelimit-limit-tokens", "x-ratelimit-remaining-tokens", "x-ratelimit-reset-tokens"):
+                    value = raw_response.headers.get(key)
+                    if value is not None:
+                        quota_headers[key] = str(value)[:80]
+                if quota_headers:
+                    _record_provider_quota("groq", candidate, quota_headers)
             except Exception as exc:
                 errors.append(f"{candidate} {type(exc).__name__}")
                 break
             usage = getattr(response, "usage", None)
             if usage:
+                _record_model_usage("groq", candidate, usage.model_dump() if hasattr(usage, "model_dump") else {"total_tokens": _usage_value(usage, "total_tokens"), "prompt_tokens": _usage_value(usage, "prompt_tokens"), "completion_tokens": _usage_value(usage, "completion_tokens")})
                 _increment_usage("groq", _usage_value(usage, "total_tokens"))
             try:
                 return _response_text(response)
@@ -305,6 +373,9 @@ def call_gemini(
     )
     try:
         for candidate in models:
+            if _model_quota_blocked("gemini", candidate):
+                errors.append(f"{candidate} quota_threshold_90pct")
+                continue
             try:
                 config = types.GenerateContentConfig(temperature=temperature)
                 if json_mode:
@@ -316,6 +387,7 @@ def call_gemini(
                 )
                 usage = getattr(response, "usage_metadata", None)
                 if usage:
+                    _record_model_usage("gemini", candidate, {"prompt_token_count": _usage_value(usage, "prompt_token_count"), "candidates_token_count": _usage_value(usage, "candidates_token_count"), "total_token_count": _usage_value(usage, "total_token_count")})
                     _increment_usage("gemini", _usage_value(usage, "total_token_count"))
                 text = getattr(response, "text", None)
                 if not isinstance(text, str) or not text.strip():
@@ -336,6 +408,7 @@ def call_ollama(
     temperature: float = 0.7,
     timeout: int = 120,
     json_mode: bool = False,
+    num_predict: int = 512,
 ) -> str:
     base_url = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").strip().rstrip("/")
     model = model or os.getenv("OLLAMA_MODEL", "gemma3:4b").strip()
@@ -346,7 +419,7 @@ def call_ollama(
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "stream": False,
-        "options": {"temperature": temperature, "num_predict": 512},
+        "options": {"temperature": temperature, "num_predict": max(16, min(int(num_predict), 4096))},
     }
     if json_mode:
         payload["format"] = "json"
@@ -369,6 +442,7 @@ def call_openai_compatible(
     temperature: float = 0.7,
     timeout: int = 60,
     json_mode: bool = False,
+    provider: str = "",
 ) -> str:
     payload: dict = {
         "model": model,
@@ -382,66 +456,114 @@ def call_openai_compatible(
         headers["Authorization"] = f"Bearer {api_key}"
     response = requests.post(f"{base_url}/chat/completions", headers=headers, json=payload, timeout=timeout)
     response.raise_for_status()
-    raw = response.json()["choices"][0]["message"]["content"].strip()
+    body = response.json()
+    usage = body.get("usage") if isinstance(body, dict) else None
+    if provider and usage:
+        _record_model_usage(provider, model, usage)
+    if provider:
+        quota_headers = {}
+        for key in ("x-ratelimit-limit-requests", "x-ratelimit-remaining-requests", "x-ratelimit-reset-requests", "x-ratelimit-limit-tokens", "x-ratelimit-remaining-tokens", "x-ratelimit-reset-tokens", "x-ratelimit-limit", "x-ratelimit-remaining", "x-ratelimit-reset", "retry-after"):
+            value = response.headers.get(key)
+            if value is not None:
+                quota_headers[key] = str(value)[:80]
+        if quota_headers:
+            _record_provider_quota(provider, model, quota_headers)
+    raw = body["choices"][0]["message"]["content"].strip()
     if not raw:
         raise RuntimeError("AI provider returned an empty response.")
     return raw
 
 
 def call_pollinations_text(prompt: str, temperature: float = 0.7, timeout: int = 60, json_mode: bool = False) -> str:
+    if _model_quota_blocked("pollinations_text", POLLINATIONS_TEXT_MODEL):
+        raise RuntimeError("pollinations_text quota threshold reached")
     return call_openai_compatible(
         prompt, base_url=POLLINATIONS_TEXT_URL, api_key="", model=POLLINATIONS_TEXT_MODEL,
-        temperature=temperature, timeout=timeout, json_mode=json_mode,
+        temperature=temperature, timeout=timeout, json_mode=json_mode, provider="pollinations_text",
     )
 
 
 def call_nvidia_nim(prompt: str, temperature: float = 0.7, timeout: int = 60, json_mode: bool = False) -> str:
-    api_key = os.getenv("NVIDIA_API_KEY", "").strip()
-    if not api_key:
+    if _model_quota_blocked("nvidia", NVIDIA_NIM_MODEL):
+        raise RuntimeError("nvidia quota threshold reached")
+    # Support the owner's existing secondary key without changing the model or endpoint.
+    keys = list(dict.fromkeys(
+        value for value in (
+            os.getenv("NVIDIA_API_KEY", "").strip(),
+            os.getenv("NVIDIA_API_KEY_2", "").strip(),
+        ) if value
+    ))
+    if not keys:
         raise RuntimeError("NVIDIA_API_KEY is not configured.")
-    return call_openai_compatible(
-        prompt, base_url=NVIDIA_NIM_URL, api_key=api_key, model=NVIDIA_NIM_MODEL,
-        temperature=temperature, timeout=timeout, json_mode=json_mode,
-    )
+    errors = []
+    for api_key in keys:
+        try:
+            return call_openai_compatible(
+                prompt, base_url=NVIDIA_NIM_URL, api_key=api_key, model=NVIDIA_NIM_MODEL,
+                temperature=temperature, timeout=timeout, json_mode=json_mode, provider="nvidia",
+            )
+        except Exception as exc:
+            errors.append(type(exc).__name__)
+    raise RuntimeError("NVIDIA NIM request failed across configured keys: " + ", ".join(errors))
 
 
 def call_cloudflare_ai(prompt: str, temperature: float = 0.7, timeout: int = 60, json_mode: bool = False) -> str:
+    if _model_quota_blocked("cloudflare", CLOUDFLARE_AI_MODEL):
+        raise RuntimeError("cloudflare quota threshold reached")
     base_url = _cf_ai_base_url()
     if not base_url:
         raise RuntimeError("Set CF_ACCOUNT_ID and CF_API_TOKEN to use Cloudflare Workers AI.")
     return call_openai_compatible(
         prompt, base_url=base_url, api_key=os.getenv("CF_API_TOKEN", "").strip(), model=CLOUDFLARE_AI_MODEL,
-        temperature=temperature, timeout=timeout, json_mode=json_mode,
+        temperature=temperature, timeout=timeout, json_mode=json_mode, provider="cloudflare",
     )
 
 
 def call_openrouter(prompt: str, temperature: float = 0.7, timeout: int = 60, json_mode: bool = False) -> str:
+    if _unhealthy("openrouter") or _model_quota_blocked("openrouter", OPENROUTER_MODEL):
+        raise RuntimeError("openrouter quota/health gate is active")
     api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
     if not api_key:
         raise RuntimeError("OPENROUTER_API_KEY is not configured.")
     return call_openai_compatible(
         prompt, base_url=OPENROUTER_URL, api_key=api_key, model=OPENROUTER_MODEL,
-        temperature=temperature, timeout=timeout, json_mode=json_mode,
+        temperature=temperature, timeout=timeout, json_mode=json_mode, provider="openrouter",
     )
 
 
 def call_mistral(prompt: str, temperature: float = 0.7, timeout: int = 60, json_mode: bool = False) -> str:
+    if _model_quota_blocked("mistral", MISTRAL_MODEL):
+        raise RuntimeError("mistral quota threshold reached")
     api_key = os.getenv("MISTRAL_API_KEY", "").strip()
     if not api_key:
         raise RuntimeError("MISTRAL_API_KEY is not configured.")
     return call_openai_compatible(
         prompt, base_url=MISTRAL_URL, api_key=api_key, model=MISTRAL_MODEL,
-        temperature=temperature, timeout=timeout, json_mode=json_mode,
+        temperature=temperature, timeout=timeout, json_mode=json_mode, provider="mistral",
     )
 
 
+def call_zai(prompt: str, temperature: float = 0.7, timeout: int = 60, json_mode: bool = False) -> str:
+    if _model_quota_blocked("zai", os.getenv("ZAI_TEXT_MODEL", "glm-4.5-flash")):
+        raise RuntimeError("zai quota threshold reached")
+    api_key = os.getenv("Z_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("Z_API_KEY is not configured.")
+    base_url = os.getenv("ZAI_BASE_URL", "https://api.z.ai/api/paas/v4").strip().rstrip("/")
+    model = os.getenv("ZAI_TEXT_MODEL", "glm-4.5-flash").strip()
+    return call_openai_compatible(prompt, base_url=base_url, api_key=api_key, model=model,
+        temperature=temperature, timeout=timeout, json_mode=json_mode, provider="zai")
+
+
 def call_cerebras(prompt: str, temperature: float = 0.7, timeout: int = 60, json_mode: bool = False) -> str:
+    if _model_quota_blocked("cerebras", CEREBRAS_MODEL):
+        raise RuntimeError("cerebras quota threshold reached")
     api_key = os.getenv("CEREBRAS_API_KEY", "").strip()
     if not api_key:
         raise RuntimeError("CEREBRAS_API_KEY is not configured.")
     return call_openai_compatible(
         prompt, base_url=CEREBRAS_URL, api_key=api_key, model=CEREBRAS_MODEL,
-        temperature=temperature, timeout=timeout, json_mode=json_mode,
+        temperature=temperature, timeout=timeout, json_mode=json_mode, provider="cerebras",
     )
 
 
@@ -457,26 +579,41 @@ def _parse_json_response(raw: str | dict) -> dict:
 
 
 def is_configured() -> bool:
-    return bool(
-        omniroute_client.is_configured()
-        or os.getenv("GEMINI_API_KEY", "").strip()
-        or os.getenv("GROQ_API_KEY", "").strip()
-        or os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").strip()
-        or True  # pollinations_text is keyless and always available
-    )
+    """Whether at least one supported provider has enough configuration to attempt.
+
+    This is configuration readiness only; network/model health is established by
+    an explicit model_health probe, never by import or a UI status read.
+    """
+    from . import model_health
+    return any(model_health._is_configured(name) for name in PROVIDER_ORDER)
+
+
+def generate_for_task_json(task: str, prompt: str, temperature: float = 0.35, timeout: int = 45) -> dict:
+    """Use the task-specific portfolio, or an explicitly selected local Ollama model."""
+    if not _autonomy_local_only() and os.getenv("AI_GENERATION_PROVIDER", "auto").strip().lower() == "ollama":
+        parsed = generate_json(prompt, temperature=temperature, timeout=timeout)
+        parsed.setdefault("_nextdecode_model_route", {
+            "task": task,
+            "provider": "ollama",
+            "model": os.getenv("OLLAMA_MODEL", "qwen2.5-coder:3b").strip(),
+            "execution": "local",
+        })
+        return parsed
+    from .model_router import generate_for_task
+    result = generate_for_task(task, prompt, timeout=timeout, json_mode=True, temperature=temperature)
+    parsed = _parse_json_response(result["text"])
+    parsed.setdefault("_nextdecode_model_route", result["route"])
+    return parsed
 
 
 def generate_json(prompt: str, temperature: float, timeout: int) -> dict:
     """Use a selected provider, or try the configured free/local providers in order."""
     attempts = []
-    selected_provider = "ollama" if _autonomy_local_only() else os.getenv("AI_GENERATION_PROVIDER", "auto").strip().lower()
+    selected_provider = "auto" if _autonomy_local_only() else os.getenv("AI_GENERATION_PROVIDER", "auto").strip().lower()
 
     def add_provider(provider: str) -> None:
         if provider in _exhausted_providers or _unhealthy(provider):
             return
-        if provider == "omniroute":
-            if omniroute_client.is_configured():
-                attempts.append(("omniroute", "OmniRoute", lambda: omniroute_client.generate_json(prompt, temperature, timeout)))
         elif provider == "gemini":
             if os.getenv("GEMINI_API_KEY", "").strip():
                 attempts.append(("gemini", "Gemini", lambda: call_gemini(prompt, temperature=temperature, timeout=timeout, json_mode=True)))
@@ -492,8 +629,6 @@ def generate_json(prompt: str, temperature: float, timeout: int) -> dict:
                         json_mode=True,
                     ),
                 ))
-        elif provider == "ollama":
-            attempts.append(("ollama", "Ollama", lambda: call_ollama(prompt, temperature=temperature, timeout=timeout, json_mode=True)))
         elif provider == "pollinations_text":
             attempts.append(("pollinations_text", "PollinationsText", lambda: call_pollinations_text(prompt, temperature=temperature, timeout=timeout, json_mode=True)))
         elif provider == "nvidia":
@@ -508,19 +643,28 @@ def generate_json(prompt: str, temperature: float, timeout: int) -> dict:
         elif provider == "mistral":
             if os.getenv("MISTRAL_API_KEY", "").strip():
                 attempts.append(("mistral", "Mistral", lambda: call_mistral(prompt, temperature=temperature, timeout=timeout, json_mode=True)))
+        elif provider == "zai":
+            if os.getenv("Z_API_KEY", "").strip():
+                attempts.append(("zai", "Z.AI", lambda: call_zai(prompt, temperature=temperature, timeout=timeout, json_mode=True)))
         elif provider == "cerebras":
             if os.getenv("CEREBRAS_API_KEY", "").strip():
                 attempts.append(("cerebras", "Cerebras", lambda: call_cerebras(prompt, temperature=temperature, timeout=timeout, json_mode=True)))
-        elif provider != "omniroute":
+        elif provider == "ollama":
+            # Explicit local selection only: never add Ollama to hosted auto-fallback.
+            model = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:3b").strip()
+            attempts.append(("ollama", "Ollama", lambda: call_ollama(
+                prompt, model=model, temperature=temperature, timeout=timeout, json_mode=True
+            )))
+        else:
             raise RuntimeError(f"AI_GENERATION_PROVIDER '{provider}' is not configured.")
 
     if selected_provider == "auto":
         for provider in _provider_order():
             add_provider(provider)
-    elif selected_provider in set(PROVIDER_ORDER):
+    elif selected_provider in set(PROVIDER_ORDER) or selected_provider == "ollama":
         add_provider(selected_provider)
     else:
-        raise RuntimeError("AI_GENERATION_PROVIDER must be auto, omniroute, gemini, groq, or ollama.")
+        raise RuntimeError("AI_GENERATION_PROVIDER must be auto, ollama, or one of the active hosted providers.")
 
     errors = []
     for name, label, request in attempts:
@@ -545,18 +689,12 @@ def _auto_text_chain(prompt: str, timeout: int, **kwargs) -> str:
     def add(provider: str) -> None:
         if provider in _exhausted_providers or _unhealthy(provider):
             return
-        if provider == "omniroute":
-            if omniroute_client.is_configured():
-                attempts.append(("omniroute", "OmniRoute", lambda: json.dumps(
-                    omniroute_client.generate_json(prompt, 0.7, timeout), ensure_ascii=False)))
         elif provider == "groq":
             if os.getenv("GROQ_API_KEY", "").strip():
                 attempts.append(("groq", "Groq", lambda: call_groq(prompt, temperature=0.7, timeout=timeout)))
         elif provider == "gemini":
             if os.getenv("GEMINI_API_KEY", "").strip():
                 attempts.append(("gemini", "Gemini", lambda: call_gemini(prompt, temperature=0.7, timeout=timeout)))
-        elif provider == "ollama":
-            attempts.append(("ollama", "Ollama", lambda: call_ollama(prompt, temperature=0.7, timeout=timeout)))
         elif provider == "pollinations_text":
             attempts.append(("pollinations_text", "PollinationsText", lambda: call_pollinations_text(prompt, temperature=0.7, timeout=timeout)))
         elif provider == "nvidia":
@@ -571,6 +709,9 @@ def _auto_text_chain(prompt: str, timeout: int, **kwargs) -> str:
         elif provider == "mistral":
             if os.getenv("MISTRAL_API_KEY", "").strip():
                 attempts.append(("mistral", "Mistral", lambda: call_mistral(prompt, temperature=0.7, timeout=timeout)))
+        elif provider == "zai":
+            if os.getenv("Z_API_KEY", "").strip():
+                attempts.append(("zai", "Z.AI", lambda: call_zai(prompt, temperature=0.7, timeout=timeout)))
         elif provider == "cerebras":
             if os.getenv("CEREBRAS_API_KEY", "").strip():
                 attempts.append(("cerebras", "Cerebras", lambda: call_cerebras(prompt, temperature=0.7, timeout=timeout)))
@@ -598,15 +739,23 @@ def generate(prompt: str, provider: str | None = None, **kwargs) -> str:
     Parameters
     ----------
     prompt: str – the user prompt.
-    provider: str – one of ``groq``, ``openai``, ``anthropic``, ``gemini``, ``ollama``.
+    provider: str – one of ``groq``, ``openai``, ``anthropic``, or ``gemini``.
     When no provider is given the configured chain is walked in order, so a
     single slow or broken provider cannot stall a whole run.
     **kwargs: any provider‑specific arguments (e.g., ``model=``).
     """
     if provider is None:
+        if not _autonomy_local_only() and os.getenv("AI_GENERATION_PROVIDER", "auto").strip().lower() == "ollama":
+            return call_ollama(
+                prompt,
+                model=os.getenv("OLLAMA_MODEL", "qwen2.5-coder:3b").strip(),
+                temperature=float(kwargs.get("temperature", 0.7)),
+                timeout=int(kwargs.get("timeout", 120)),
+                num_predict=int(kwargs.get("num_predict", 96)),
+            )
         return _auto_text_chain(prompt, int(kwargs.get("timeout", 60)))
     provider = provider.lower()
-    if provider not in {"groq", "openai", "anthropic", "gemini", "google", "ollama"}:
+    if provider not in {"groq", "openai", "anthropic", "gemini", "google"}:
         raise ValueError(f"Unsupported provider: {provider}")
     try:
         if provider == "groq":
@@ -617,8 +766,6 @@ def generate(prompt: str, provider: str | None = None, **kwargs) -> str:
             return call_anthropic(prompt, **kwargs)
         if provider in {"gemini", "google"}:
             return call_gemini(prompt, **kwargs)
-        if provider == "ollama":
-            return call_ollama(prompt, **kwargs)
         raise ValueError(f"Unsupported provider: {provider}")
     except Exception as exc:
         if provider not in {"gemini", "google"} and os.getenv("GEMINI_API_KEY", "").strip():
@@ -639,7 +786,7 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(description="Unified LLM wrapper")
     parser.add_argument("prompt", help="Prompt string or @path-to-file")
-    parser.add_argument("-p", "--provider", default=DEFAULT_PROVIDER, help="groq|openai|anthropic|gemini|ollama")
+    parser.add_argument("-p", "--provider", default=DEFAULT_PROVIDER, help="groq|openai|anthropic|gemini")
     parser.add_argument("-m", "--model", help="Override default model for the chosen provider")
     args = parser.parse_args(argv)
 

@@ -89,78 +89,89 @@ class GenerateJsonTests(unittest.TestCase):
         }
         return source_text, selection, script, secondary_text
 
-    def test_uses_omniroute_first(self):
-        expected = {"title": "OmniRoute"}
+    def test_retired_providers_are_not_in_active_order(self):
+        with patch.dict(os.environ, {"AI_PROVIDER_CHAIN": "omniroute,ollama,gemini,groq"}, clear=True):
+            order = multi_model_ai._provider_order()
+        self.assertNotIn("omniroute", order)
+        self.assertNotIn("ollama", order)
+        self.assertIn("gemini", order)
+        self.assertIn("groq", order)
+
+    def test_autonomy_mode_fails_closed_without_retired_local_runtime(self):
+        with patch.dict(os.environ, {"NEXTDECODE_AUTONOMY_MODE": "true", "AI_HEALTH_GATE": "false"}, clear=True):
+            self.assertEqual(multi_model_ai._provider_order(), [])
+            with self.assertRaisesRegex(RuntimeError, "no providers are configured"):
+                multi_model_ai.generate_json("prompt", temperature=0.4, timeout=5)
+
+    def test_explicit_ollama_selection_uses_only_local_json_provider(self):
         with (
-            patch.object(multi_model_ai.omniroute_client, "is_configured", return_value=True),
-            patch.object(multi_model_ai.omniroute_client, "generate_json", return_value=expected) as omniroute,
+            patch.dict(os.environ, {
+                "AI_GENERATION_PROVIDER": "ollama",
+                "OLLAMA_MODEL": "qwen2.5-coder:3b",
+                "AI_HEALTH_GATE": "false",
+            }, clear=True),
+            patch.object(multi_model_ai, "call_ollama", return_value='{"title":"Local draft"}') as local,
+            patch.object(multi_model_ai, "call_groq") as groq,
             patch.object(multi_model_ai, "call_gemini") as gemini,
-            patch.object(multi_model_ai, "call_groq") as groq,
-            patch.object(multi_model_ai, "call_ollama") as ollama,
         ):
-            result = multi_model_ai.generate_json("prompt", temperature=0.4, timeout=30)
-
-        self.assertEqual(result, expected)
-        omniroute.assert_called_once_with("prompt", 0.4, 30)
+            result = multi_model_ai.generate_json("prompt", temperature=0.25, timeout=120)
+        self.assertEqual(result, {"title": "Local draft"})
+        local.assert_called_once_with(
+            "prompt", model="qwen2.5-coder:3b", temperature=0.25, timeout=120, json_mode=True
+        )
+        groq.assert_not_called()
         gemini.assert_not_called()
-        groq.assert_not_called()
-        ollama.assert_not_called()
 
-    def test_selected_ollama_provider_does_not_try_remote_providers(self):
-        expected = {"title": "Local model"}
+    def test_explicit_ollama_selection_routes_task_json_locally(self):
         with (
-            patch.dict(os.environ, {"AI_GENERATION_PROVIDER": "ollama"}),
-            patch.object(multi_model_ai.omniroute_client, "is_configured", return_value=True),
-            patch.object(multi_model_ai.omniroute_client, "generate_json") as omniroute,
-            patch.object(multi_model_ai, "call_gemini") as gemini,
-            patch.object(multi_model_ai, "call_groq") as groq,
-            patch.object(multi_model_ai, "call_ollama", return_value=expected) as ollama,
+            patch.dict(os.environ, {
+                "AI_GENERATION_PROVIDER": "ollama",
+                "OLLAMA_MODEL": "qwen2.5-coder:3b",
+                "AI_HEALTH_GATE": "false",
+            }, clear=True),
+            patch.object(multi_model_ai, "call_ollama", return_value='{"voice_text":"local"}') as local,
+            patch("app.providers.model_router.generate_for_task") as hosted,
         ):
-            result = multi_model_ai.generate_json("prompt", temperature=0.4, timeout=30)
+            result = multi_model_ai.generate_for_task_json("script_drafting", "prompt", temperature=0.3, timeout=180)
+        self.assertEqual(result["voice_text"], "local")
+        self.assertEqual(result["_nextdecode_model_route"]["provider"], "ollama")
+        self.assertEqual(result["_nextdecode_model_route"]["execution"], "local")
+        local.assert_called_once()
+        hosted.assert_not_called()
 
-        self.assertEqual(result, expected)
-        ollama.assert_called_once()
-        omniroute.assert_not_called()
-        gemini.assert_not_called()
-        groq.assert_not_called()
-
-    def test_falls_back_to_gemini_after_omniroute_failure(self):
+    def test_explicit_ollama_selection_routes_plain_text_locally(self):
         with (
-            patch.object(multi_model_ai.omniroute_client, "is_configured", return_value=True),
-            patch.object(multi_model_ai.omniroute_client, "generate_json", side_effect=TimeoutError),
-            patch.object(multi_model_ai, "call_gemini", return_value='{"title":"Gemini"}') as gemini,
-            patch.object(multi_model_ai, "call_groq") as groq,
+            patch.dict(os.environ, {"AI_GENERATION_PROVIDER": "ollama", "OLLAMA_MODEL": "qwen2.5-coder:3b"}, clear=True),
+            patch.object(multi_model_ai, "call_ollama", return_value="local text") as local,
+            patch.object(multi_model_ai, "_auto_text_chain") as hosted,
         ):
-            result = multi_model_ai.generate_json("prompt", temperature=0.4, timeout=30)
+            result = multi_model_ai.generate("prompt", timeout=180, temperature=0.2)
+        self.assertEqual(result, "local text")
+        local.assert_called_once()
+        hosted.assert_not_called()
 
-        self.assertEqual(result, {"title": "Gemini"})
-        gemini.assert_called_once()
-        groq.assert_not_called()
+    def test_ollama_is_not_added_to_hosted_auto_fallback(self):
+        with patch.dict(os.environ, {"AI_PROVIDER_CHAIN": "ollama,groq"}, clear=True):
+            self.assertNotIn("ollama", multi_model_ai._provider_order())
 
     def test_invalid_provider_json_falls_through_to_groq(self):
         with (
-            patch.object(multi_model_ai.omniroute_client, "is_configured", return_value=False),
+            patch.dict(os.environ, {"AI_PROVIDER_CHAIN": "gemini,groq", "AI_HEALTH_GATE": "false", "GEMINI_API_KEY": "g", "GROQ_API_KEY": "q"}, clear=True),
             patch.object(multi_model_ai, "call_gemini", return_value="not json"),
             patch.object(multi_model_ai, "call_groq", return_value='{"title":"Groq"}') as groq,
         ):
             result = multi_model_ai.generate_json("prompt", temperature=0.4, timeout=30)
-
         self.assertEqual(result, {"title": "Groq"})
         groq.assert_called_once()
 
-    def test_reports_provider_failures_when_all_fallbacks_fail(self):
+    def test_reports_provider_failures_without_retired_adapters(self):
         with (
-            patch.dict(os.environ, {"GEMINI_API_KEY": "g", "GROQ_API_KEY": "q"}, clear=True),
-            patch.object(multi_model_ai.omniroute_client, "is_configured", return_value=False),
+            patch.dict(os.environ, {"GEMINI_API_KEY": "g", "GROQ_API_KEY": "q", "AI_PROVIDER_CHAIN": "omniroute,ollama,gemini,groq,pollinations_text", "AI_HEALTH_GATE": "false"}, clear=True),
             patch.object(multi_model_ai, "call_gemini", side_effect=TimeoutError),
             patch.object(multi_model_ai, "call_groq", side_effect=RuntimeError),
-            patch.object(multi_model_ai, "call_pollinations_text", side_effect=RuntimeError("pollinations down")),
-            patch.object(multi_model_ai, "call_ollama", side_effect=ConnectionError),
+            patch.object(multi_model_ai, "call_pollinations_text", side_effect=ConnectionError),
         ):
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "Gemini TimeoutError, Groq RuntimeError, PollinationsText RuntimeError, Ollama ConnectionError",
-            ):
+            with self.assertRaisesRegex(RuntimeError, "Gemini TimeoutError, Groq RuntimeError, PollinationsText ConnectionError"):
                 multi_model_ai.generate_json("prompt", temperature=0.4, timeout=30)
 
     def test_short_generator_uses_shared_provider_layer(self):
@@ -169,10 +180,36 @@ class GenerateJsonTests(unittest.TestCase):
         sentence = "Researchers tested a small tool that turns sketches into simple animations, while the experiment still has limits for real world use."
         voice_text = " ".join([sentence] * 5)
         parsed = {
-            "content_pillar": "How It Works",
+            "content_pillar": "science_explainer",
+            "editorial_angle": "A concrete research prototype shows how sketches can become animations, with current limitations.",
+            "viewer_question": "Can a sketch become an animation automatically?",
+            "viewer_payoff": "The viewer understands the capability and its current limits.",
             "hook": sentence,
             "title": "A New Way to Animate Sketches",
             "voice_text": voice_text,
+            "production_storyboard": [
+                {"phase": "hook", "start_seconds": 0, "end_seconds": 15, "narration": sentence,
+                 "viewer_purpose": "Show the surprising research capability.",
+                 "visual_type": "custom_animation", "visual_action": "A hand-drawn sketch transforms into a simple moving scene.",
+                 "asset_search": "research sketch to animation demo", "on_screen_text": "FROM SKETCH TO MOTION",
+                 "audio_direction": "Natural narration with a subtle pencil sound.", "edit_direction": "Open on the sketch and match-cut into the animation.",
+                 "rights_notes": "Use only an authorized demonstration or create an original illustrative sketch.",
+                 "fallback": "Create a clearly labelled original demonstration."},
+                {"phase": "evidence", "start_seconds": 15, "end_seconds": 30, "narration": sentence,
+                 "viewer_purpose": "Ground the explanation in the research.",
+                 "visual_type": "primary_document", "visual_action": "Show the research page and highlight the described method.",
+                 "asset_search": "original research paper", "on_screen_text": "WHAT THE RESEARCH SHOWS",
+                 "audio_direction": "Narration with music lowered under evidence.", "edit_direction": "Slow document push-in and readable highlight.",
+                 "rights_notes": "Link and attribute the original paper; use a limited relevant excerpt.",
+                 "fallback": "Use a source-linked citation card."},
+                {"phase": "payoff", "start_seconds": 30, "end_seconds": 45, "narration": sentence,
+                 "viewer_purpose": "Clarify practical limits and takeaway.",
+                 "visual_type": "motion_graphic", "visual_action": "Compare a simple successful output with a labelled limitation card.",
+                 "asset_search": "original sketch animation comparison graphic", "on_screen_text": "PROMISING, NOT LIMITLESS",
+                 "audio_direction": "Narration resolves with a clean music ending.", "edit_direction": "Split-screen comparison, then decisive cut to end card.",
+                 "rights_notes": "Use original graphics and only cleared example assets.",
+                 "fallback": "Use a text-led comparison with the limitation stated."}
+            ],
             "broll_query": "animation sketches",
             "youtube_tags": ["AI", "technology"],
             "instagram_hashtags": ["#AI", "#Tech"],
@@ -187,7 +224,7 @@ class GenerateJsonTests(unittest.TestCase):
         with (
             patch.object(create_short, "discover_topics", return_value=research),
             patch.object(create_short.multi_model_ai, "is_configured", return_value=True),
-            patch.object(create_short.multi_model_ai, "generate_json", return_value=parsed) as generate_json,
+            patch.object(create_short.multi_model_ai, "generate_for_task_json", return_value=parsed) as generate_json,
         ):
             result = create_short.generate_script("Example AI research")
 

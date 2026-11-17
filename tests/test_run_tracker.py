@@ -135,12 +135,16 @@ def test_mark_failed_writes_sanitized_failure_json(tmp_path: Path) -> None:
         pass
 
     exc = Boom("secret sk_live_ABCDEF123456 leaked in message https://api.example.com?token=xyz")
-    tracker.mark_failed(stage="voice", exc=exc, error_category="voice")
+    tracker.mark_failed(
+        stage="voice", exc=exc, error_category="voice",
+        detail="ffmpeg exited with code 1; diagnostic: Invalid data found when processing input",
+    )
 
     failure = json.loads((tracker.run_dir / "failure.json").read_text(encoding="utf-8"))
     assert failure["error_type"] == "Boom"
     assert failure["error_category"] == "voice"
     assert failure["stage"] == "voice"
+    assert "Invalid data found" in failure["detail"]
     # Sanitization: the raw message must not appear anywhere.
     blob = json.dumps(failure)
     assert "sk_live" not in blob and "token" not in blob and "api.example.com" not in blob
@@ -334,3 +338,145 @@ def test_sha256_consistency_file_larger_than_2mb(tmp_path: Path) -> None:
 
     assert entry["sha256"] == hashlib.sha256(payload).hexdigest()
     assert entry["bytes"] == len(payload)
+
+
+def test_stage_lifecycle_persists_in_progress_then_terminal(tmp_path: Path) -> None:
+    tracker = rt.start_run("stage lifecycle", runs_root=tmp_path / "runs", index_path=tmp_path / "i.jsonl", now=NOW)
+    started = tracker.start_stage("research", started_at="2026-10-31T14:22:34+00:00")
+    assert started["status"] == "in_progress"
+    active = rt.load_manifest(tracker.run_dir)["stages"][0]
+    assert active["finished_at"] is None
+    assert active["status"] == "in_progress"
+
+    tracker.finish_stage("research", finished_at="2026-10-31T14:24:02+00:00")
+    finished = rt.load_manifest(tracker.run_dir)["stages"][0]
+    assert finished == {
+        "name": "research",
+        "started_at": "2026-10-31T14:22:34+00:00",
+        "finished_at": "2026-10-31T14:24:02+00:00",
+        "status": "ok",
+    }
+
+
+def test_stage_lifecycle_rejects_duplicate_active_and_unknown_finish(tmp_path: Path) -> None:
+    tracker = rt.start_run("stage guards", runs_root=tmp_path / "runs", index_path=tmp_path / "i.jsonl", now=NOW)
+    tracker.start_stage("voice")
+    with pytest.raises(RuntimeError, match="already active"):
+        tracker.start_stage("voice")
+    with pytest.raises(RuntimeError, match="not active"):
+        tracker.finish_stage("render")
+    tracker.finish_stage("voice", status="failed")
+    assert rt.load_manifest(tracker.run_dir)["stages"][0]["status"] == "failed"
+
+
+def test_mark_failed_closes_any_active_stage(tmp_path: Path) -> None:
+    tracker = rt.start_run("active failure", runs_root=tmp_path / "runs", index_path=tmp_path / "i.jsonl", now=NOW)
+    tracker.start_stage("render", started_at="2026-10-31T14:22:34+00:00")
+    tracker.mark_failed(stage="render", error_category="render", finished_at=NOW)
+    stage = rt.load_manifest(tracker.run_dir)["stages"][0]
+    assert stage["status"] == "failed"
+    assert stage["finished_at"] == "2026-10-31T14:22:33+00:00"
+
+
+def test_pipeline_stage_failure_preserves_original_exception_when_telemetry_fails(
+    monkeypatch, tmp_path: Path
+) -> None:
+    from app.script import pipeline
+
+    original = RuntimeError("original research failure")
+
+    def fail_selection(*args, **kwargs):
+        raise original
+
+    def failing_stage_hook(name: str, status: str) -> None:
+        if status == "failed":
+            raise OSError("manifest disk write failed")
+
+    monkeypatch.setattr(pipeline, "select_topic", fail_selection)
+
+    with pytest.raises(RuntimeError, match="original research failure") as caught:
+        pipeline.run(
+            "synthetic topic",
+            work_dir=tmp_path / "work",
+            stage_hook=failing_stage_hook,
+        )
+
+    assert caught.value is original
+
+
+def test_mark_ok_refuses_active_stage_and_open_promotion(tmp_path: Path) -> None:
+    tracker = rt.start_run(
+        "terminal guards",
+        runs_root=tmp_path / "runs",
+        index_path=tmp_path / "i.jsonl",
+        now=NOW,
+    )
+    tracker.start_stage("render")
+    with pytest.raises(RuntimeError, match="active stage"):
+        tracker.mark_ok()
+    tracker.finish_stage("render")
+
+    tracker.manifest["promotion"] = {"status": "promoting"}
+    with pytest.raises(RuntimeError, match="open promotion window"):
+        tracker.mark_ok()
+
+    tracker.manifest["promotion"]["status"] = "completed"
+    tracker.mark_ok()
+    assert rt.load_manifest(tracker.run_dir)["status"] == "ok"
+
+
+def test_stage_lifecycle_tolerates_malformed_legacy_stage_entries(tmp_path: Path) -> None:
+    tracker = rt.start_run(
+        "legacy stage data",
+        runs_root=tmp_path / "runs",
+        index_path=tmp_path / "i.jsonl",
+        now=NOW,
+    )
+    tracker.manifest["stages"] = [None, "legacy-corrupt-entry", 7]
+    tracker.start_stage("render")
+    tracker.finish_stage("render")
+    assert tracker.manifest["stages"][-1]["status"] == "ok"
+    assert tracker.manifest["stages"][:3] == [None, "legacy-corrupt-entry", 7]
+
+
+def test_mark_failed_tolerates_malformed_promotion_field(tmp_path: Path) -> None:
+    tracker = rt.start_run(
+        "legacy promotion data",
+        runs_root=tmp_path / "runs",
+        index_path=tmp_path / "i.jsonl",
+        now=NOW,
+    )
+    tracker.manifest["promotion"] = "corrupt-legacy-value"
+    tracker.mark_failed(stage="render", exc=RuntimeError("safe failure"))
+    assert tracker.manifest["status"] == "failed"
+    assert tracker.manifest["promotion"] == "corrupt-legacy-value"
+
+def test_non_list_stage_history_is_rejected_for_successful_lifecycle(tmp_path: Path) -> None:
+    tracker = rt.start_run(
+        "malformed stage container",
+        runs_root=tmp_path / "runs",
+        index_path=tmp_path / "i.jsonl",
+        now=NOW,
+    )
+    tracker.manifest["stages"] = {"not": "a list"}
+    with pytest.raises(RuntimeError, match="malformed stage history"):
+        tracker.start_stage("render")
+    with pytest.raises(RuntimeError, match="malformed stage history"):
+        tracker.finish_stage("render")
+    with pytest.raises(RuntimeError, match="malformed stage history"):
+        tracker.record_stage("render", started_at="a", finished_at="b")
+    with pytest.raises(RuntimeError, match="malformed stage history"):
+        tracker.mark_ok()
+
+
+def test_mark_failed_can_finalize_with_non_list_stage_history(tmp_path: Path) -> None:
+    tracker = rt.start_run(
+        "malformed stage failure",
+        runs_root=tmp_path / "runs",
+        index_path=tmp_path / "i.jsonl",
+        now=NOW,
+    )
+    tracker.manifest["stages"] = {"not": "a list"}
+    tracker.mark_failed(stage="render", exc=RuntimeError("real failure"))
+    assert tracker.manifest["status"] == "failed"
+    assert tracker.manifest["failure"]["stage"] == "render"

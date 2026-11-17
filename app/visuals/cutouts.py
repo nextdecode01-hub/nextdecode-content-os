@@ -218,14 +218,26 @@ def select_cutout_scenes(ledger: dict, scene_claims: dict[int, list[dict]], *,
         return {"selected": [], "budget": 0, "reason": "no scenes"}
     budget = max(1, int(total * max_ratio)) if any(scene_claims.values()) else 0
     candidates = []
+    seen_claims: set[str] = set()
+    skipped_unknown_rights: list[str] = []
     for index in sorted(scene_claims):
         for claim in scene_claims[index]:
+            claim_id = str(claim.get("claim_id") or "")
             status = str((claim.get("verification") or {}).get("status") or "unverified")
             kind = str(claim.get("claim_type") or "statement")
+            # A source card reproduces a source excerpt. Unknown reuse rights
+            # mean this is not an eligible visual asset; the scene can still use
+            # independently licensed stock/AI visuals and retain the claim link.
+            if not claim_id or claim_id in seen_claims:
+                continue
+            if reuse_rights(claim).get("status") != "permitted":
+                skipped_unknown_rights.append(claim_id)
+                continue
             if status not in {"supported", "partially_supported"}:
                 continue
             if kind not in CUTOUT_CLAIM_TYPES:
                 continue
+            seen_claims.add(claim_id)
             priority = 0
             if kind in {"statistic", "funding", "forecast"}:
                 priority += 2
@@ -233,7 +245,11 @@ def select_cutout_scenes(ledger: dict, scene_claims: dict[int, list[dict]], *,
                 priority += 1
             candidates.append((priority, index, claim))
     if not candidates:
-        return {"selected": [], "budget": budget, "reason": "no claim worth a cutout"}
+        return {
+            "selected": [], "budget": budget,
+            "skipped_unknown_rights": sorted(set(skipped_unknown_rights)),
+            "reason": "no claim with eligible verification and reuse rights",
+        }
     candidates.sort(key=lambda item: (-item[0], item[1]))
     selected: list[dict] = []
     used_scenes: set[int] = set()
@@ -255,6 +271,7 @@ def select_cutout_scenes(ledger: dict, scene_claims: dict[int, list[dict]], *,
     return {
         "selected": sorted(selected, key=lambda item: item["scene_index"]),
         "budget": budget,
+        "skipped_unknown_rights": sorted(set(skipped_unknown_rights)),
         "reason": f"{len(selected)} of {budget} cutout slot(s) used",
     }
 

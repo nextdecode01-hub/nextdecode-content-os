@@ -24,7 +24,8 @@ from dotenv import load_dotenv
 
 from app.script import pipeline as strong_pipeline
 from app.script.short import PROFILE, SCRIPT_PROFILE, generate_script, record_topic
-from app.tracking.run_tracker import start_run
+from app.tracking.run_tracker import start_run, open_run
+from app.visuals.storyboard import StoryboardReviewRequired
 from app.operations.video_archive import archive_video
 SCRIPT_DIR = ROOT
 load_dotenv(SCRIPT_DIR / ".env", override=True)
@@ -272,14 +273,27 @@ def render_final_short(bg_video: Path, audio_path: Path, ass_path: Path, output_
     print(f"\n[SUCCESS] Final Short Ready: {output_file.resolve()}\n")
 
 
-def run_strong_pipeline(topic: str, work_dir: Path, metadata_file: Path) -> dict:
+def run_strong_pipeline(
+    topic: str, work_dir: Path, metadata_file: Path, *, stage_hook=None,
+    content_format: str = "youtube_shorts",
+) -> dict:
     """Run the strong editorial pipeline and persist its metadata."""
-    print("[*] Running the strong pipeline (topic -> research -> script -> multi-shot motion)...")
+    # Validate before any work: a declared-but-unimplemented format must never
+    # be silently produced as a Short, and long-form must not enter this path.
+    contract = strong_pipeline.resolve_content_format(content_format, producer="short_video")
+    print(
+        f"[*] Running the strong pipeline for {contract['format_id']} "
+        f"({', '.join(contract['platforms'])}): topic -> research -> script -> multi-shot motion..."
+    )
     data = strong_pipeline.run(
         topic or None,
         seconds=PROFILE["seconds"],
         work_dir=work_dir,
+        stage_hook=stage_hook,
+        content_format=contract["format_id"],
     )
+    data["content_format"] = contract["format_id"]
+    data["content_format_contract"] = contract
     data["script_profile"] = SCRIPT_PROFILE
     data["target_duration_seconds"] = PROFILE["seconds"]
     data["word_range"] = [PROFILE["min_words"], PROFILE["max_words"]]
@@ -338,12 +352,19 @@ def run_dry_run(work_dir: Path, metadata_file: Path) -> dict:
     video_path = work_dir / "output_short.mp4"
 
     print("[*] DRY_RUN=1: skipping LLM, research, stock, archive, and upload stages.")
-    voice = voice_provider.synthesize(DRY_RUN_TEXT, audio_path, provider="silent")
-    if not voice.get("path"):
-        raise RuntimeError(f"Dry-run silent voice failed: {voice.get('error')}")
-    duration = float(voice_provider.probe_duration(audio_path) or voice.get("duration_hint") or 0)
-    if duration <= 0:
-        raise RuntimeError("Dry-run voice track has no measurable duration.")
+    # A truly silent track is correctly rejected by production audio QA. Use a
+    # low-risk audible calibration tone so the dry-run can exercise muxing and
+    # audio-stream validation without pretending to synthesize narration.
+    duration = 45.0
+    subprocess.run([
+        "ffmpeg", "-y", "-f", "lavfi", "-i",
+        f"sine=frequency=440:sample_rate=44100:duration={duration}",
+        "-c:a", "libmp3lame", "-b:a", "128k", str(audio_path),
+    ], check=True, capture_output=True, text=True)
+    measured_duration = float(voice_provider.probe_duration(audio_path) or 0)
+    if measured_duration <= 0:
+        raise RuntimeError("Dry-run calibration audio has no measurable duration.")
+    duration = measured_duration
 
     _dry_run_background(background_path, duration)
     words = strong_pipeline.estimated_words(DRY_RUN_TEXT, duration)
@@ -356,8 +377,9 @@ def run_dry_run(work_dir: Path, metadata_file: Path) -> dict:
         "title": "DRY RUN - local pipeline check",
         "topic": "DRY_RUN local verification",
         "hook": "Local dry run proves the short pipeline can move from script to voice to background to captions to a checked vertical render without calling a paid model.",
-        "voice_text": DRY_RUN_TEXT,
-        "word_count": len(DRY_RUN_TEXT.split()),
+        "voice_text": "",
+        "audio_test_signal": "440Hz calibration tone; not narration",
+        "word_count": 0,
         "duration_seconds": duration,
         "broll_query": "local procedural background",
         "visuals": {"mode": "procedural_dry_run", "asset_count": 0},
@@ -374,7 +396,7 @@ def run_dry_run(work_dir: Path, metadata_file: Path) -> dict:
 
 def run_standard_pipeline(topic: str, *, audio_file: Path, bg_video_file: Path,
                           ass_sub_file: Path, output_mp4: Path,
-                          metadata_file: Path) -> dict:
+                          metadata_file: Path, content_format: str = "youtube_shorts") -> dict:
     """Legacy single-pass generation, kept for deliberate explicit use only.
 
     A Strong Pipeline failure never lands here: Option A (strict fail-closed)
@@ -383,6 +405,7 @@ def run_standard_pipeline(topic: str, *, audio_file: Path, bg_video_file: Path,
     """
     # 1. Script
     data = generate_script(topic)
+    data["content_format"] = content_format
     data["governance"] = _draft_governance("standard-legacy")
     with open(metadata_file, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
@@ -416,6 +439,7 @@ def run_standard_pipeline(topic: str, *, audio_file: Path, bg_video_file: Path,
 def main():
     parser = argparse.ArgumentParser(description="Autonomous Shorts & Reels Generator")
     parser.add_argument("--topic", type=str, default="", help="Specific topic or keyword")
+    parser.add_argument("--content-format", choices=["youtube_shorts", "instagram_reels", "facebook_reels"], default="youtube_shorts")
     parser.add_argument(
         "--quality",
         type=str,
@@ -433,7 +457,21 @@ def main():
         action="store_true",
         help="deliberately run the legacy single-pass path (never an automatic fallback)",
     )
+    parser.add_argument(
+        "--resume",
+        metavar="RUN_DIR",
+        default="",
+        help="resume a parked awaiting_review run after storyboard approval",
+    )
     args = parser.parse_args()
+
+    # Validate the requested format once, before any branch runs. argparse
+    # limits the CLI choices; this enforces the channel-profile + producer
+    # contract for every entry path (dry run, strong, legacy).
+    format_contract = strong_pipeline.resolve_content_format(
+        args.content_format, producer="short_video"
+    )
+    args.content_format = format_contract["format_id"]
 
     work_dir = SCRIPT_DIR / "outputs"
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -444,13 +482,89 @@ def main():
     metadata_file = SCRIPT_DIR / "data" / "metadata.json"
     metadata_file.parent.mkdir(parents=True, exist_ok=True)
 
+    if args.resume:
+        # Resume a parked awaiting_review run after storyboard approval.  The
+        # storyboard review gate stays enforced inside pipeline.resume.
+        resume_run_dir = Path(args.resume)
+        if not resume_run_dir.is_absolute():
+            resume_run_dir = SCRIPT_DIR / resume_run_dir
+        if not resume_run_dir.is_dir():
+            raise SystemExit(f"resume run directory not found: {resume_run_dir}")
+        tracker = open_run(resume_run_dir,
+                           runs_root=work_dir / "runs",
+                           index_path=SCRIPT_DIR / "data" / "runs" / "index.jsonl")
+        print(f"[*] Resuming run {tracker.run_id}")
+        stage = "strong_pipeline"
+        tracker.reopen()
+
+        def persist_stage(name: str, status: str, provenance: dict | None = None) -> None:
+            if status == "in_progress":
+                tracker.start_stage(name)
+            else:
+                tracker.finish_stage(name, status=status, provenance=provenance)
+
+        try:
+            data = strong_pipeline.resume(tracker.run_dir, stage_hook=persist_stage)
+        except StoryboardReviewRequired as exc:
+            # The gate stayed enforced: the approval is missing, stale or bound
+            # to different artifacts.  Park the run again and tell the operator.
+            tracker.mark_awaiting_review(stage=stage,
+                detail=f"storyboard review required: {exc.review_status or 'blocked'}")
+            _record_failure("strong_pipeline", exc, "unknown")
+            print(f"[!] Storyboard review still required before render "
+                  f"({exc.review_status}); run parked as awaiting_review.")
+            print("    Approve the contact sheet first, or resolve the blocked scenes, then resume again.")
+            raise SystemExit(3) from None
+        data["run_id"] = tracker.run_id
+        data["governance"] = {
+            "entry": "orchestrated",
+            "publishable": True,
+            "run_id": tracker.run_id,
+            "stamped_at": datetime.now(timezone.utc).isoformat(),
+        }
+        stage = "metadata_persistence"
+        tracker.start_stage(stage)
+        (tracker.run_dir / "metadata.json").write_text(
+            json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        tracker.record_artifact("metadata", tracker.run_dir / "metadata.json", stage=stage)
+        tracker.finish_stage(stage, provenance={"engine": "metadata writer", "kind": "stdlib"})
+        video_source = Path(data.get("video_path") or tracker.run_dir / "output_short.mp4")
+        if not video_source.is_absolute():
+            video_source = tracker.run_dir / video_source.name
+        tracker.record_artifact("video", video_source, stage="render")
+        tracker.promote_slots({
+            "video": output_mp4,
+            "metadata": metadata_file,
+        })
+        tracker.mark_ok()
+        record_topic(data.get("topic", data.get("title", "")))
+        archived_video = archive_video(output_mp4, metadata_file, SCRIPT_DIR, "shorts", data["title"])
+        print(f"[+] Archived Short: {archived_video.resolve()}")
+        print(json.dumps({
+            "status": "success",
+            "quality": "strong",
+            "run_id": data.get("run_id", ""),
+            "title": data["title"],
+            "video_path": str(output_mp4),
+            "tags": data.get("tags", []),
+            "source_urls": data.get("source_urls", []),
+            "word_count": data.get("word_count"),
+            "shots": len(data.get("shots", [])),
+            "duration_seconds": data.get("duration_seconds"),
+            "resumed": True,
+        }))
+        return
+
     if os.getenv("DRY_RUN", "").strip().lower() in {"1", "true", "yes"}:
         dry_dir = work_dir / "dry_run"
         dry_metadata = SCRIPT_DIR / "data" / "metadata_dry_run.json"
         data = run_dry_run(dry_dir, dry_metadata)
+        data["content_format"] = args.content_format
+        data["content_format_contract"] = format_contract
         print(json.dumps({
             "status": "success",
             "dry_run": True,
+            "content_format": args.content_format,
             "title": data["title"],
             "video_path": data["video_path"],
             "duration_seconds": data["duration_seconds"],
@@ -478,9 +592,20 @@ def main():
                 quality="strong",
             )
             print(f"[*] Run directory: {tracker.run_dir}")
+            # Persist each real producer stage as it starts and finishes.
+            def persist_stage(name: str, status: str, provenance: dict | None = None) -> None:
+                if status == "in_progress":
+                    tracker.start_stage(name)
+                else:
+                    tracker.finish_stage(name, status=status, provenance=provenance)
+
             # Phase 10.4: the run directory is the sole work_dir, so every
             # strong artifact (research, shots, render) lands inside it.
-            data = run_strong_pipeline(args.topic, tracker.run_dir, tracker.run_dir / "metadata.json")
+            data = run_strong_pipeline(
+                args.topic, tracker.run_dir, tracker.run_dir / "metadata.json",
+                stage_hook=persist_stage,
+                content_format=args.content_format,
+            )
             # Promotion: validate, record, then atomically move the validated
             # artifacts into the legacy slots.  The run is only marked ``ok``
             # AFTER the promotion journal reports ``completed`` — a crash
@@ -492,16 +617,18 @@ def main():
                 "run_id": tracker.run_id,
                 "stamped_at": datetime.now(timezone.utc).isoformat(),
             }
+            stage = "metadata_persistence"
+            tracker.start_stage(stage)
             (tracker.run_dir / "metadata.json").write_text(
                 json.dumps(data, indent=2) + "\n", encoding="utf-8")
-            tracker.record_artifact("metadata", tracker.run_dir / "metadata.json", stage="strong_pipeline")
+            tracker.record_artifact(
+                "metadata", tracker.run_dir / "metadata.json", stage=stage
+            )
+            tracker.finish_stage(stage)
             video_source = Path(data.get("video_path") or tracker.run_dir / "output_short.mp4")
             if not video_source.is_absolute():
                 video_source = tracker.run_dir / video_source.name
             tracker.record_artifact("video", video_source, stage="render")  # containment enforced in run_tracker
-            tracker.record_stage("strong_pipeline",
-                                 started_at=tracker.manifest.get("started_at"),
-                                 finished_at=datetime.now(timezone.utc).isoformat())
             stage = "promotion"
             tracker.promote_slots({
                 "video": output_mp4,
@@ -517,18 +644,43 @@ def main():
             if tracker is not None:
                 with contextlib.suppress(Exception):
                     tracker.mark_failed(stage=stage, exc=exc,
-                                        error_category="unknown")
+                                        error_category="unknown", detail=_redact(exc))
             _record_failure("strong_pipeline", exc, "strong")
             print(f"[!] Strong pipeline aborted from inside ({type(exc).__name__}); "
                   "stopping without a fallback.")
             raise
+        except StoryboardReviewRequired as exc:
+            # The storyboard review gate stopped the render.  Persist the
+            # storyboard and contact sheet as artifacts, park the run as
+            # awaiting_review (non-terminal), and tell the operator how to
+            # approve and resume.  The gate stays fully enforced.
+            if tracker is not None:
+                try:
+                    sb_path = Path(exc.storyboard_path) if exc.storyboard_path else None
+                    if sb_path and sb_path.is_file():
+                        tracker.record_artifact("storyboard", sb_path, stage=stage)
+                    contact = Path(str((sb_path and json.loads(sb_path.read_text()).get("contact_sheet")) or ""))
+                    if contact.is_file():
+                        tracker.record_artifact("contact_sheet", contact, stage=stage)
+                except Exception:
+                    # Artifact recording is best-effort; the parked state is what matters.
+                    pass
+                tracker.mark_awaiting_review(stage=stage,
+                    detail=f"storyboard review required: {exc.review_status or 'blocked'}")
+            _record_failure("strong_pipeline", exc, "unknown")
+            print(f"[!] Storyboard review required before render ({exc.review_status}); "
+                  f"run {tracker.run_id if tracker else 'unknown'} parked as awaiting_review.")
+            print("    Approve:  python -m app.visuals.storyboard <storyboard.json> --reviewer <name>")
+            print(f"    Resume:   python pipelines/short.py --resume {tracker.run_dir if tracker else '<run-dir>'}")
+            raise SystemExit(3) from None
         except Exception as exc:
             # Fail closed: no legacy generation, no success payload, no metadata
             # overwrite - the previous successful run stays exactly as it was.
             if tracker is not None:
                 category = "io" if stage == "promotion" else "unknown"
                 with contextlib.suppress(Exception):
-                    tracker.mark_failed(stage=stage, exc=exc, error_category=category)
+                    tracker.mark_failed(stage=stage, exc=exc, error_category=category,
+                                        detail=_redact(exc))
             _record_failure("strong_pipeline", exc, "strong")
             print(f"[!] Strong pipeline failed ({type(exc).__name__}: {_redact(exc)}); "
                   "stopping without a fallback.")
@@ -554,7 +706,8 @@ def main():
 
     data = run_standard_pipeline(
         args.topic, audio_file=audio_file, bg_video_file=bg_video_file,
-        ass_sub_file=ass_sub_file, output_mp4=output_mp4, metadata_file=metadata_file)
+        ass_sub_file=ass_sub_file, output_mp4=output_mp4, metadata_file=metadata_file,
+        content_format=args.content_format)
     # Output metadata for the caller
     print(json.dumps({
         "status": "success",

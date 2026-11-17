@@ -105,21 +105,19 @@ def test_dry_run_uses_local_voice_and_writes_separate_metadata(tmp_path) -> None
     audio = tmp_path / "voice.mp3"
     audio.write_bytes(b"local-test-audio")
     with (
-        patch(
-            "app.voice.provider.synthesize",
-            return_value={"path": str(audio), "provider": "silent", "duration_hint": 30.0},
-        ) as synthesize,
         patch("app.voice.provider.probe_duration", return_value=30.0),
         patch.object(short_pipeline, "_dry_run_background"),
         patch.object(short_pipeline, "render_final_short"),
         patch.dict("os.environ", {"STORYBOARD_GATE": "warn"}),
         patch("app.render.subtitles.make_kinetic_ass"),
+        patch("pipelines.short.subprocess.run") as ffmpeg_run,
     ):
         metadata = short_pipeline.run_dry_run(tmp_path / "work", tmp_path / "metadata_dry_run.json")
 
-    synthesize.assert_called_once()
-    assert synthesize.call_args.kwargs["provider"] == "silent"
+    ffmpeg_run.assert_called_once()
+    assert "sine=frequency=440" in " ".join(ffmpeg_run.call_args.args[0])
     assert metadata["dry_run"] is True
+    assert metadata["audio_test_signal"].startswith("440Hz")
     assert metadata["human_review_status"] == "not_for_publish"
     assert (tmp_path / "metadata_dry_run.json").is_file()
 

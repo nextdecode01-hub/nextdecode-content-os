@@ -1,0 +1,527 @@
+{
+  "rows_read": 72,
+  "valid_rows": 72,
+  "invalid_rows": 0,
+  "channel_count": 9,
+  "format_mix": {
+    "long_form": 65,
+    "short": 7
+  },
+  "validation_errors": [],
+  "channels": {
+    "Astrum": {
+      "videos": 8,
+      "median_lifetime_views": 817110.0,
+      "baseline_48_upload_median": null,
+      "median_vs_channel_baseline": null,
+      "median_age_days": 24.0,
+      "format_mix": {
+        "long_form": 7,
+        "short": 1
+      }
+    },
+    "Company Man": {
+      "videos": 8,
+      "median_lifetime_views": 196462.0,
+      "baseline_48_upload_median": 133269,
+      "median_vs_channel_baseline": 1.474,
+      "median_age_days": 30.5,
+      "format_mix": {
+        "long_form": 8
+      }
+    },
+    "Economics Explained": {
+      "videos": 8,
+      "median_lifetime_views": 653349.0,
+      "baseline_48_upload_median": null,
+      "median_vs_channel_baseline": null,
+      "median_age_days": 23.5,
+      "format_mix": {
+        "long_form": 8
+      }
+    },
+    "Found And Explained": {
+      "videos": 8,
+      "median_lifetime_views": 485086.0,
+      "baseline_48_upload_median": null,
+      "median_vs_channel_baseline": null,
+      "median_age_days": 50.0,
+      "format_mix": {
+        "long_form": 8
+      }
+    },
+    "Mustard": {
+      "videos": 8,
+      "median_lifetime_views": 3136026.0,
+      "baseline_48_upload_median": null,
+      "median_vs_channel_baseline": null,
+      "median_age_days": 381.0,
+      "format_mix": {
+        "long_form": 5,
+        "short": 3
+      }
+    },
+    "PolyMatter": {
+      "videos": 8,
+      "median_lifetime_views": 198561.0,
+      "baseline_48_upload_median": 375143,
+      "median_vs_channel_baseline": 0.529,
+      "median_age_days": 186.0,
+      "format_mix": {
+        "long_form": 8
+      }
+    },
+    "Primal Space": {
+      "videos": 8,
+      "median_lifetime_views": 1148557.0,
+      "baseline_48_upload_median": null,
+      "median_vs_channel_baseline": null,
+      "median_age_days": 124.5,
+      "format_mix": {
+        "long_form": 6,
+        "short": 2
+      }
+    },
+    "Real Engineering": {
+      "videos": 8,
+      "median_lifetime_views": 694707.5,
+      "baseline_48_upload_median": null,
+      "median_vs_channel_baseline": null,
+      "median_age_days": 83.5,
+      "format_mix": {
+        "long_form": 7,
+        "short": 1
+      }
+    },
+    "Wendover Productions": {
+      "videos": 8,
+      "median_lifetime_views": 1072702.0,
+      "baseline_48_upload_median": 1257704,
+      "median_vs_channel_baseline": 0.853,
+      "median_age_days": 61.0,
+      "format_mix": {
+        "long_form": 8
+      }
+    }
+  },
+  "title_patterns": {
+    "rise_and_fall": {
+      "videos": 4,
+      "channels": 2,
+      "median_lifetime_views": 222900.5,
+      "median_channel_baseline_ratio": 0.898
+    },
+    "decline_question": {
+      "videos": 3,
+      "channels": 1,
+      "median_lifetime_views": 241837,
+      "median_channel_baseline_ratio": 1.815
+    },
+    "head_to_head": {
+      "videos": 3,
+      "channels": 3,
+      "median_lifetime_views": 949623,
+      "median_channel_baseline_ratio": 1.794
+    },
+    "ambitious_future": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 650447,
+      "median_channel_baseline_ratio": null
+    },
+    "anomaly_discovery": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 379458,
+      "median_channel_baseline_ratio": null
+    },
+    "anomaly_question": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 954702,
+      "median_channel_baseline_ratio": null
+    },
+    "belief_challenge": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 379124,
+      "median_channel_baseline_ratio": 1.011
+    },
+    "belief_reversal": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 561558,
+      "median_channel_baseline_ratio": null
+    },
+    "business_model": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 1046953,
+      "median_channel_baseline_ratio": 0.832
+    },
+    "competition_strategy": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 370305,
+      "median_channel_baseline_ratio": 0.987
+    },
+    "compressed_explainer": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 39851,
+      "median_channel_baseline_ratio": null
+    },
+    "cost_mystery": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 189179,
+      "median_channel_baseline_ratio": 0.504
+    },
+    "covert_operation": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 2734494,
+      "median_channel_baseline_ratio": null
+    },
+    "crisis_explainer": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 207943,
+      "median_channel_baseline_ratio": 0.554
+    },
+    "deadline_decision": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 722925,
+      "median_channel_baseline_ratio": null
+    },
+    "engineering_failure": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 200279,
+      "median_channel_baseline_ratio": null
+    },
+    "escape_physics": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 1437525,
+      "median_channel_baseline_ratio": null
+    },
+    "escape_story": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 1256035,
+      "median_channel_baseline_ratio": null
+    },
+    "extreme_design_stat": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 2647310,
+      "median_channel_baseline_ratio": null
+    },
+    "extreme_environment": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 679518,
+      "median_channel_baseline_ratio": null
+    },
+    "fear_question": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 294132,
+      "median_channel_baseline_ratio": null
+    },
+    "first_detection": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 1234538,
+      "median_channel_baseline_ratio": null
+    },
+    "forbidden_material": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 3945382,
+      "median_channel_baseline_ratio": null
+    },
+    "forgotten_concept": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 763362,
+      "median_channel_baseline_ratio": null
+    },
+    "full_documentary": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 462271,
+      "median_channel_baseline_ratio": null
+    },
+    "giant_technology": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 742736,
+      "median_channel_baseline_ratio": null
+    },
+    "hidden_cause": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 774048,
+      "median_channel_baseline_ratio": null
+    },
+    "hidden_mechanism": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 1041079,
+      "median_channel_baseline_ratio": null
+    },
+    "hidden_system": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 1098451,
+      "median_channel_baseline_ratio": 0.873
+    },
+    "hidden_thing": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 581925,
+      "median_channel_baseline_ratio": null
+    },
+    "how_it_became_possible": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 612822,
+      "median_channel_baseline_ratio": null
+    },
+    "incentive_paradox": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 412308,
+      "median_channel_baseline_ratio": null
+    },
+    "industry_controversy": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 663187,
+      "median_channel_baseline_ratio": null
+    },
+    "infrastructure_explainer": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 2343729,
+      "median_channel_baseline_ratio": 1.863
+    },
+    "large_system": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 211471,
+      "median_channel_baseline_ratio": 0.564
+    },
+    "legal_paradox": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 957127,
+      "median_channel_baseline_ratio": 0.761
+    },
+    "lost_artifact": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 4752932,
+      "median_channel_baseline_ratio": null
+    },
+    "national_capability": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 602179,
+      "median_channel_baseline_ratio": null
+    },
+    "nostalgia_comparison": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 151087,
+      "median_channel_baseline_ratio": 1.134
+    },
+    "number_solution": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 708275,
+      "median_channel_baseline_ratio": null
+    },
+    "political_economic_question": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 415648,
+      "median_channel_baseline_ratio": null
+    },
+    "preparation_under_threat": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 1828629,
+      "median_channel_baseline_ratio": 1.454
+    },
+    "psychology_meets_economics": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 421138,
+      "median_channel_baseline_ratio": null
+    },
+    "real_world_experiment": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 598423,
+      "median_channel_baseline_ratio": null
+    },
+    "recovery_mechanism": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 844819,
+      "median_channel_baseline_ratio": null
+    },
+    "regional_advantage": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 555333,
+      "median_channel_baseline_ratio": 0.442
+    },
+    "relatable_problem": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 884917,
+      "median_channel_baseline_ratio": null
+    },
+    "scam_exposure": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 161512,
+      "median_channel_baseline_ratio": null
+    },
+    "secret_plan": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 2854649,
+      "median_channel_baseline_ratio": null
+    },
+    "self_inflicted_problem": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 163386,
+      "median_channel_baseline_ratio": 0.436
+    },
+    "strange_prototype": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 284908,
+      "median_channel_baseline_ratio": null
+    },
+    "strategic_question": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 114870,
+      "median_channel_baseline_ratio": 0.306
+    },
+    "superlative_machine": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 408614,
+      "median_channel_baseline_ratio": null
+    },
+    "superlative_subject": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 3279344,
+      "median_channel_baseline_ratio": null
+    },
+    "system_failure": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 143769,
+      "median_channel_baseline_ratio": 0.383
+    },
+    "technology_changed_everything": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 2303404,
+      "median_channel_baseline_ratio": null
+    },
+    "threat_metaphor": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 4217321,
+      "median_channel_baseline_ratio": null
+    },
+    "transformative_invention": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 2946467,
+      "median_channel_baseline_ratio": null
+    },
+    "unexpected_natural_history": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 731888,
+      "median_channel_baseline_ratio": null
+    },
+    "unexpected_success": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 1188973,
+      "median_channel_baseline_ratio": 0.945
+    },
+    "unexplained_event": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 5110141,
+      "median_channel_baseline_ratio": null
+    },
+    "unstoppable_machine": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 539177,
+      "median_channel_baseline_ratio": null
+    },
+    "unusual_design": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 630338,
+      "median_channel_baseline_ratio": null
+    },
+    "why_it_disappeared": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 184564,
+      "median_channel_baseline_ratio": null
+    },
+    "worldview_shift": {
+      "videos": 1,
+      "channels": 1,
+      "median_lifetime_views": 1346610,
+      "median_channel_baseline_ratio": null
+    }
+  },
+  "upload_age_cohorts": {
+    "0-30d": {
+      "videos": 24,
+      "median_lifetime_views": 624207.5,
+      "median_channel_baseline_ratio": 0.873
+    },
+    "31-90d": {
+      "videos": 23,
+      "median_lifetime_views": 630338,
+      "median_channel_baseline_ratio": 1.815
+    },
+    "91-180d": {
+      "videos": 15,
+      "median_lifetime_views": 731888,
+      "median_channel_baseline_ratio": 0.529
+    },
+    "181d+": {
+      "videos": 10,
+      "median_lifetime_views": 459150.5,
+      "median_channel_baseline_ratio": 0.711
+    }
+  },
+  "limitations": [
+    "Views are lifetime totals, not first-day or first-week views.",
+    "Only all-long-form baseline channels are normalized; mixed-format channel medians are excluded because the format mix differs.",
+    "Pattern comparisons are descriptive and non-causal; topic, channel, format and age confound results.",
+    "Public data does not provide CTR, retention, swipe-away rate, subscriber conversion or revenue."
+  ]
+}

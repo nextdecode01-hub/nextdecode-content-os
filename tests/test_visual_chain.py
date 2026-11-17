@@ -5,9 +5,9 @@ import tempfile
 import unittest
 import urllib.error
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
-from app.visuals import chain, vision_review
+from app.visuals import beats, chain, vision_review, storyboard
 
 
 def shot(index, caption, visual=None, duration=2.8):
@@ -25,6 +25,63 @@ class ClassificationTests(unittest.TestCase):
     def test_numbers_and_claims_become_motion_graphics(self):
         self.assertEqual(chain.classify_scene(shot(0, "AI data centers used 415 TWh"))["visual_type"], "motion_graphic")
         self.assertEqual(chain.classify_scene(shot(1, "The report says demand doubled"))["visual_type"], "motion_graphic")
+
+    def test_moe_token_arrival_intro_can_use_an_original_diagram(self):
+        result = chain.classify_scene({
+            "text": "What does a mixture-of-experts model do when a token arrives?",
+            "asset_query": "mixture of experts expert modules diagram",
+        })
+        self.assertEqual(result["scene_type"], "diagram")
+        self.assertEqual(result["visual_type"], "motion_graphic")
+
+    def test_token_by_token_moe_beat_can_use_a_diagram(self):
+        result = chain.classify_scene({
+            "text": "For Mixtral, the choice is made for each token, not once for the whole prompt.",
+            "caption": "Token-by-token selection",
+            "asset_query": "mixture of experts token routing diagram",
+        })
+        self.assertEqual(result["scene_type"], "diagram")
+        self.assertEqual(result["visual_type"], "motion_graphic")
+
+    def test_scene_brief_uses_narration_text_and_specific_moe_footage_purpose(self):
+        brief = chain.build_scene_brief({
+            "index": 0,
+            "text": "Mixtral is Mistral's sparse mixture-of-experts model, with open weights.",
+            "asset_query": "sparse expert network router flowchart",
+            "duration": 3.5,
+        })
+        self.assertEqual(brief["scene_type"], "footage")
+        self.assertIn("GPU server hardware", brief["visual_purpose"])
+        self.assertEqual(brief["fallback_chain"][0], "wikimedia")
+
+    def test_specialist_network_beat_can_use_an_original_moe_diagram(self):
+        result = chain.classify_scene({
+            "claim": "Think of the experts as specialist networks inside one model.",
+            "caption": "Specialist networks inside one model",
+            "asset_query": "mixture of experts expert modules diagram",
+            "topic": "How mixture-of-experts models route tokens",
+        })
+        self.assertEqual(result["scene_type"], "diagram")
+        self.assertEqual(result["visual_type"], "motion_graphic")
+
+    def test_moe_topic_query_does_not_turn_non_routing_beats_into_diagrams(self):
+        generic_query = "mixture of experts token routing diagram"
+        intro = chain.classify_scene({
+            "claim": "Mixtral is Mistral's sparse mixture-of-experts model, with open weights.",
+            "caption": "Mixtral sparse model",
+            "asset_query": generic_query,
+            "topic": "How AI Models Activate a Few Experts to Save Compute",
+        })
+        mechanism = chain.classify_scene({
+            "claim": "A router selects two experts for each token at every layer.",
+            "caption": "The router chooses",
+            "asset_query": generic_query,
+            "topic": "How AI Models Activate a Few Experts to Save Compute",
+        })
+        self.assertEqual(intro["visual_type"], "broll")
+        self.assertEqual(intro["scene_type"], "footage")
+        self.assertEqual(mechanism["visual_type"], "motion_graphic")
+        self.assertEqual(mechanism["scene_type"], "diagram")
 
     def test_ambient_text_becomes_broll(self):
         self.assertEqual(chain.classify_scene(shot(0, "Rows of servers humming in a dark hall"))["visual_type"], "broll")
@@ -169,6 +226,96 @@ class ResolutionTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def test_generated_video_is_registered_only_with_valid_sidecar_and_hash(self):
+        import hashlib
+        import json
+        import shutil
+        import subprocess
+
+        if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
+            self.skipTest("ffmpeg/ffprobe unavailable")
+        from app.visuals import motion_director
+        from app.visuals.shotplan import plan_shot_plan, annotate_shots
+
+        video_dir = self.dir / "clips"
+        video_dir.mkdir()
+        media = video_dir / "server-room.mp4"
+        subprocess.run([
+            shutil.which("ffmpeg"), "-v", "error", "-f", "lavfi",
+            "-i", "color=c=navy:s=360x640:d=2:r=30", "-an",
+            "-pix_fmt", "yuv420p", "-c:v", "libx264", "-y", str(media),
+        ], check=True, capture_output=True, timeout=30)
+        digest = hashlib.sha256(media.read_bytes()).hexdigest()
+        from app.providers.video_generation_workflow import _probe_video
+        metadata = _probe_video(media)
+        record = {
+            "schema": "nextdecode.generated-video-asset.v1",
+            "run_id": "local-acceptance",
+            "provider": "kling", "model": "fixture-model", "task_id": "fixture-task",
+            "prompt": "A vertical server room fixture", "local_path": str(media.resolve()),
+            "sha256": digest, "status": "qualified", "metadata": metadata,
+            "requires_editorial_review": True,
+        }
+        sidecar = media.with_suffix(media.suffix + ".asset.json")
+        sidecar.write_text(json.dumps(record), encoding="utf-8")
+        source = {
+            "topic": "AI infrastructure",
+            "voice_text": "Rows of servers power the model.",
+            "shots": [{
+                "claim": "Rows of servers power the model.",
+                "caption": "Rows of servers power the model.",
+                "asset_query": "server room",
+                "generated_video_asset": str(sidecar),
+            }],
+        }
+        shots = motion_director.plan_shots(source, audio_duration=5.0)
+        plan = plan_shot_plan(source, audio_duration=5.0)
+        shots = annotate_shots(shots, plan)
+        planner = chain.plan_scenes(shots)
+        detail = chain.resolve_scene(shots[0], self.dir, planner, dry_run=True)
+        self.assertEqual(detail["provider"], "generated_video")
+        self.assertEqual(Path(detail["path"]).resolve(), media.resolve())
+        self.assertEqual(detail["generated_provenance"]["sha256"], digest)
+        self.assertTrue(detail["generated_provenance"]["requires_editorial_review"])
+
+    def test_tampered_generated_video_is_rejected_and_uses_local_fallback(self):
+        import hashlib
+        import json
+        import shutil
+        import subprocess
+
+        if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
+            self.skipTest("ffmpeg/ffprobe unavailable")
+        media = self.dir / "tampered.mp4"
+        subprocess.run([
+            shutil.which("ffmpeg"), "-v", "error", "-f", "lavfi",
+            "-i", "color=c=navy:s=360x640:d=2:r=30", "-an",
+            "-pix_fmt", "yuv420p", "-c:v", "libx264", "-y", str(media),
+        ], check=True, capture_output=True, timeout=30)
+        from app.providers.video_generation_workflow import _probe_video
+        record = {
+            "schema": "nextdecode.generated-video-asset.v1", "run_id": "local-acceptance",
+            "provider": "kling", "model": "fixture-model", "task_id": "fixture-task",
+            "prompt": "fixture", "local_path": str(media.resolve()),
+            "sha256": hashlib.sha256(media.read_bytes()).hexdigest(),
+            "status": "qualified", "metadata": _probe_video(media),
+            "requires_editorial_review": True,
+        }
+        sidecar = media.with_suffix(media.suffix + ".asset.json")
+        sidecar.write_text(json.dumps(record), encoding="utf-8")
+        media.write_bytes(media.read_bytes() + b"tampered")
+        shot = {
+            "index": 0, "duration": 2.0, "claim": "A server room powers the model",
+            "caption": "A server room powers the model", "visual": "server room",
+            "generated_video_asset": str(sidecar),
+        }
+        planner = chain.plan_scenes([shot])
+        detail = chain.resolve_scene(shot, self.dir, planner, dry_run=True)
+        self.assertNotEqual(detail["provider"], "generated_video")
+        self.assertNotEqual(detail.get("provider"), "generated_video_rejected")
+        self.assertTrue(detail.get("path"))
+        self.assertTrue(Path(detail["path"]).is_file())
+
     def test_motion_graphic_uses_local_card_without_network(self):
         shots = [shot(0, "AI data centers used 415 TWh")]
         planner = chain.plan_scenes(shots)
@@ -214,6 +361,23 @@ class ResolutionTests(unittest.TestCase):
             )
         self.assertIsNone(result)
 
+    def test_moe_neural_network_still_passes_exact_phrase_match(self):
+        with patch(
+            "app.visuals.stock_fetcher.fetch_shot_image",
+            return_value={
+                "path": str(self.dir / "x.jpg"),
+                "title": "File:Message Passing Neural Network.png",
+                "query": "neural network",
+            },
+        ), patch.object(chain, "_visual_quality", return_value=("ok", {})):
+            result = chain._wikimedia_asset(
+                shot(0, "specialist networks inside a model"),
+                "mixture experts expert", self.dir, 0, set(),
+                extra_queries=["neural network"],
+            )
+        self.assertIsNotNone(result)
+        self.assertEqual(result["query"], "neural network")
+
     def test_specific_wikimedia_title_is_kept(self):
         with patch(
             "app.visuals.stock_fetcher.fetch_shot_image",
@@ -245,7 +409,9 @@ class ResolutionTests(unittest.TestCase):
         with patch.object(chain, "_env", side_effect=lambda name: "key" if name == "PIXABAY_API_KEY" else ""), patch.object(
             chain, "_pixabay_asset", side_effect=[dark, good]
         ), patch.object(chain, "_wikimedia_asset", return_value=None), patch.object(
-            chain, "_gradient_caption", return_value=self.dir / "g.mp4"
+            chain, "_ai_configured", return_value=False
+        ), patch.object(vision_review, "enabled", return_value=False), patch.object(
+            vision_review, "review_asset", return_value={"checked": False, "status": "disabled", "attempts": 0, "reason": "vision review disabled"}
         ):
             detail = chain.resolve_scene(shots[0], self.dir, planner)
         self.assertEqual(detail["provider"], "pixabay")
@@ -265,6 +431,8 @@ class ResolutionTests(unittest.TestCase):
         with patch.object(chain, "_env", side_effect=lambda name: "key" if name == "PIXABAY_API_KEY" else ""), patch.object(
             chain, "_pixabay_asset", return_value=dark
         ), patch.object(chain, "_wikimedia_asset", return_value=None), patch.object(
+            chain, "_ai_configured", return_value=False
+        ), patch.object(chain, "_local_component_asset", return_value=None), patch.object(
             chain, "_gradient_caption", return_value=self.dir / "g.mp4"
         ):
             detail = chain.resolve_scene(shots[0], self.dir, planner)
@@ -275,17 +443,21 @@ class ResolutionTests(unittest.TestCase):
         shots = [shot(i, "rows of servers humming") for i in range(4)]
         planner = chain.plan_scenes(shots)
         self.assertEqual(planner["stock_cap"], 1)
+        # lexical-medium stock assets are fine while vision review is disabled
         with patch.object(chain, "_env", side_effect=lambda name: "key" if name == "PIXABAY_API_KEY" else ""), patch.object(
             chain, "_pixabay_asset", return_value={"path": "/tmp/x.mp4", "provider": "pixabay", "title": ""}
         ) as pixabay, patch.object(chain, "_wikimedia_asset", return_value=None), patch.object(
-            chain, "_gradient_caption", return_value=self.dir / "g.mp4"
+            vision_review, "enabled", return_value=False
+        ), patch.object(
+            vision_review, "review_asset", return_value={"checked": False, "status": "disabled", "attempts": 0, "reason": "vision review disabled"}
         ):
             first = chain.resolve_scene(shots[0], self.dir, planner)
             second = chain.resolve_scene(shots[1], self.dir, planner)
 
         self.assertEqual(first["provider"], "pixabay")
         self.assertEqual(planner["stock_used"], 1)
-        self.assertEqual(second["provider"], "gradient")
+        # after the cap the stock chain is skipped; the local original graphic wins
+        self.assertEqual(second["provider"], "motion_graphic")
         self.assertEqual(pixabay.call_count, 1)
 
     def test_wikimedia_assets_record_a_stable_id_and_honest_relevance(self):
@@ -305,7 +477,8 @@ class ResolutionTests(unittest.TestCase):
             chain, "_wikimedia_asset", side_effect=AssertionError("no network in dry run")
         ), patch.object(chain, "_ai_asset", side_effect=AssertionError("no network in dry run")):
             detail = chain.resolve_scene(shots[0], self.dir, planner, dry_run=True)
-        self.assertEqual(detail["provider"], "gradient")
+        # the local original vector component is preferred over a caption slide by design
+        self.assertEqual(detail["provider"], "motion_graphic")
 
     def test_successful_lower_tier_provider_keeps_the_attempt_trail(self):
         shots = [shot(i, "rows of servers humming") for i in range(4)]
@@ -313,19 +486,25 @@ class ResolutionTests(unittest.TestCase):
         with patch.object(chain, "_env", side_effect=lambda name: "key" if name == "PIXABAY_API_KEY" else ""), patch.object(
             chain, "_pixabay_asset", return_value=None
         ), patch.object(
-            chain, "_wikimedia_asset", return_value={"path": "/tmp/still.jpg", "provider": "wikimedia"}
+            chain, "_wikimedia_asset", return_value={"path": "/tmp/still.jpg", "provider": "wikimedia",
+                                                     "title": "File:Data center servers rows.jpg",
+                                                     "tags": "data center servers"}
+        ), patch.object(chain, "_ai_configured", return_value=False), patch.object(
+            vision_review, "enabled", return_value=False
+        ), patch.object(
+            vision_review, "review_asset", return_value={"checked": False, "status": "disabled", "attempts": 0, "reason": "vision review disabled"}
         ):
             detail = chain.resolve_scene(shots[0], self.dir, planner)
 
         self.assertEqual(detail["provider"], "wikimedia")
         self.assertIn("no unused stock video matched", detail["attempts"])
 
-    def test_pexels_slot_is_skipped_without_key(self):
+    def test_coverr_slot_is_skipped_without_key(self):
         shots = [shot(0, "rows of servers humming")]
         planner = chain.plan_scenes(shots)
         with patch.object(chain, "_env", side_effect=lambda name: "key" if name == "PIXABAY_API_KEY" else ""), patch.object(
             chain, "_pixabay_asset", return_value=None
-        ), patch.object(chain, "_pexels_asset", side_effect=AssertionError("pexels must be skipped")), patch.object(
+        ), patch.object(chain, "_coverr_asset", side_effect=AssertionError("Coverr must be skipped without key")), patch.object(
             chain, "_wikimedia_asset", return_value=None
         ), patch.object(chain, "_ai_configured", return_value=False), patch.object(
             chain, "_gradient_caption", return_value=self.dir / "g.mp4"
@@ -339,9 +518,11 @@ class ResolutionTests(unittest.TestCase):
             chain, "_pixabay_asset", return_value=None
         ), patch.object(chain, "_wikimedia_asset", return_value=None), patch.object(
             chain, "_ai_asset", side_effect=AssertionError("ai must be gated")
-        ), patch.object(chain, "_gradient_caption", return_value=self.dir / "g.mp4"):
+        ), patch.object(chain, "_ai_configured", return_value=False):
             detail = chain.resolve_scene(shots[0], self.dir, planner)
-        self.assertEqual(detail["provider"], "gradient")
+        # stock is exhausted inside the test env, so the engine falls back to its
+        # local original vector component rather than a caption gradient by design
+        self.assertEqual(detail["provider"], "motion_graphic")
 
     def test_pixabay_failure_never_logs_the_request_url_or_key(self):
         secret = "SECRET123"
@@ -480,12 +661,12 @@ class FallbackDiagnosticsTests(unittest.TestCase):
         with patch.object(chain, "_env", return_value=""), patch.object(
             chain, "_wikimedia_asset", return_value=None
         ), patch.object(chain, "_ai_configured", return_value=False), patch.object(
-            chain, "_gradient_caption", return_value=self.dir / "g.mp4"
-        ):
+            chain, "_local_component_asset", return_value=None
+        ), patch.object(chain, "_gradient_caption", return_value=self.dir / "g.mp4"):
             detail = chain.resolve_scene(shots[0], self.dir, planner)
 
         self.assertEqual(detail["provider"], "gradient")
-        self.assertIn("no stock video provider configured", detail["fallback_reason"])
+        self.assertIn("no configured stock video provider", detail["fallback_reason"])
         self.assertIn("no unused Wikimedia still matched", detail["fallback_reason"])
         self.assertEqual(detail["relevance"], "none")
         resolved = planner["resolved"][-1]
@@ -499,6 +680,8 @@ class FallbackDiagnosticsTests(unittest.TestCase):
                 "asset_id": "pixabay:99"}
         with patch.object(chain, "_env", side_effect=lambda name: "key" if name == "PIXABAY_API_KEY" else ""), patch.object(
             chain, "_pixabay_asset", return_value=fake
+        ), patch.object(vision_review, "enabled", return_value=False), patch.object(
+            vision_review, "review_asset", return_value={"checked": False, "status": "disabled", "attempts": 0, "reason": "vision review disabled"}
         ):
             detail = chain.resolve_scene(shots[0], self.dir, planner)
 
@@ -522,7 +705,7 @@ class RelevanceValidationTests(unittest.TestCase):
             "claim": "Rows of servers humming in a dark data center",
             "caption": "servers humming",
             "asset_query": "servers",
-            "asset_query_variants": ["data center servers", "city skyline"],
+            "asset_query_variants": ["data center servers", "server rack data center"],
         }, index=index)
 
     def test_motion_graphic_is_high_confidence_and_not_reviewed(self):
@@ -626,7 +809,7 @@ class RelevanceValidationTests(unittest.TestCase):
             "claim": "Rows of servers humming in a dark data center",
             "caption": "servers humming",
             "asset_query": "servers",
-            "asset_query_variants": ["data center servers", "city skyline"],
+            "asset_query_variants": ["data center servers", "server rack data center"],
         }
         shots = [shot_data] + [shot(i, "rows of servers humming") for i in range(1, 4)]
         planner = chain.plan_scenes(shots)
@@ -638,7 +821,9 @@ class RelevanceValidationTests(unittest.TestCase):
             chain, "_pixabay_asset", side_effect=[low, medium]
         ), patch.object(chain, "_wikimedia_asset", return_value=None), patch.object(
             chain, "_ai_configured", return_value=False
-        ), patch.object(chain, "_gradient_caption", return_value=self.dir / "g.mp4"):
+        ), patch.object(vision_review, "enabled", return_value=False), patch.object(
+            vision_review, "review_asset", return_value={"checked": False, "status": "disabled", "attempts": 0, "reason": "vision review disabled"}
+        ):
             detail = chain.resolve_scene(shots[0], self.dir, planner)
 
         self.assertEqual(detail["provider"], "pixabay")
@@ -665,11 +850,14 @@ class RelevanceValidationTests(unittest.TestCase):
             chain, "_pixabay_asset", return_value=low
         ), patch.object(chain, "_wikimedia_asset", return_value=None), patch.object(
             chain, "_ai_configured", return_value=False
-        ), patch.object(chain, "_gradient_caption", return_value=self.dir / "g.mp4"):
+        ), patch.object(vision_review, "enabled", return_value=False), patch.object(
+            vision_review, "review_asset", return_value={"checked": False, "status": "disabled", "attempts": 0, "reason": "vision review disabled"}
+        ):
             detail = chain.resolve_scene(shots[0], self.dir, planner)
 
-        self.assertEqual(detail["provider"], "gradient")
-        self.assertIn("weak lexical match", detail["fallback_reason"])
+        # stock candidate was rejected; the engine keeps its local original graphic
+        self.assertEqual(detail["provider"], "motion_graphic")
+        self.assertIn("weak lexical match", "; ".join(detail["attempts"]))
         self.assertEqual(planner["stock_used"], 0)
 
     def test_resolution_records_confidence_and_review_flags(self):
@@ -705,6 +893,42 @@ class VisionReviewTests(unittest.TestCase):
         self.assertFalse(result["checked"])
         self.assertIn("disabled", result["reason"])
 
+    def test_groq_vision_review_uses_openai_compatible_image_payload(self):
+        response = Mock()
+        response.status_code = 200
+        response.json.return_value = {
+            "choices": [{
+                "message": {
+                    "content": '{"relevance":"high","reason":"A processor board supports the hardware beat."}'
+                }
+            }]
+        }
+        with patch.dict(
+            os.environ,
+            {
+                "VISION_REVIEW_PROVIDER": "groq",
+                "VISION_REVIEW_MODEL": "qwen/qwen3.8-27b",
+                "GROQ_API_KEY": "test-groq-key",
+                "GROQ_VISION_MIN_INTERVAL_SECONDS": "0",
+            },
+            clear=False,
+        ), patch.object(vision_review, "_first_frame", return_value=(b"frame", "image/jpeg")), patch.object(
+            vision_review.requests, "post", return_value=response
+        ) as post_mock:
+            result = vision_review.review_asset(
+                {"narration": "A processor board supports the hardware beat.", "visual_purpose": "show computing hardware"},
+                {"path": "/tmp/frame.mp4", "provider": "pixabay", "query": "processor board"},
+            )
+        self.assertTrue(result["checked"])
+        self.assertEqual(result["provider"], "groq")
+        self.assertEqual(result["relevance"], "high")
+        self.assertEqual(post_mock.call_args.args[0], "https://api.groq.com/openai/v1/chat/completions")
+        body = post_mock.call_args.kwargs["json"]
+        self.assertEqual(body["model"], "qwen/qwen3.8-27b")
+        self.assertEqual(body["response_format"], {"type": "json_object"})
+        image_part = body["messages"][0]["content"][1]["image_url"]["url"]
+        self.assertTrue(image_part.startswith("data:image/jpeg;base64,"))
+
     def test_vision_review_parses_a_verdict(self):
         response = type("R", (), {})()
         response.status_code = 200
@@ -717,11 +941,16 @@ class VisionReviewTests(unittest.TestCase):
             clear=False,
         ), patch.object(vision_review, "_first_frame", return_value=(b"img", "image/jpeg")), patch.object(
             vision_review.requests, "post", return_value=response
-        ):
+        ) as post_mock:
             result = vision_review.review_asset(
                 {"narration": "coding agents", "visual_purpose": "show code"},
                 {"path": "/tmp/x.mp4", "provider": "pixabay"},
             )
+        body = post_mock.call_args.kwargs["json"]
+        image_part = body["contents"][0]["parts"][1]["inlineData"]
+        self.assertEqual(image_part["mimeType"], "image/jpeg")
+        self.assertIn("data", image_part)
+        self.assertNotIn("inline_data", body["contents"][0]["parts"][1])
         self.assertTrue(result["checked"])
         self.assertEqual(result["relevance"], "medium")
         self.assertIn("code", result["reason"])
@@ -745,5 +974,558 @@ class VisionReviewTests(unittest.TestCase):
         self.assertTrue(planner["resolved"][-1]["vision_checked"])
 
 
+    def test_medium_vision_candidate_is_rejected_before_high_confidence_alternate(self):
+        shot_data = shot(0, "rows of servers humming")
+        shot_data["asset_query"] = "server rack"
+        planner = chain.plan_scenes([shot_data] + [shot(i, "rows of servers humming") for i in range(1, 4)])
+        stock = {
+            "path": "/tmp/medium.mp4", "provider": "pixabay",
+            "asset_id": "pixabay:medium", "tags": "server rack data center",
+        }
+        alternate = {
+            "path": "/tmp/high.mp4", "provider": "coverr",
+            "asset_id": "coverr:high", "tags": "server rack data center",
+        }
+        with patch.object(
+            chain, "_env",
+            side_effect=lambda name: "key" if name in {"PIXABAY_API_KEY", "COVERR_API_KEY"} else "",
+        ), patch.object(chain, "_pixabay_asset", side_effect=[stock, None]), patch.object(
+            chain, "_coverr_asset", return_value=alternate,
+        ), patch.object(chain, "_wikimedia_asset", return_value=None), patch.object(
+            chain, "_ai_configured", return_value=False,
+        ), patch.object(
+            vision_review, "review_asset", side_effect=[
+                {"checked": True, "provider": "groq", "relevance": "medium", "reason": "generic circuit board"},
+                {"checked": True, "provider": "groq", "relevance": "high", "reason": "server racks clearly visible"},
+            ],
+        ) as review:
+            detail = chain.resolve_scene(shot_data, self.dir, planner)
+
+        self.assertEqual(detail["provider"], "coverr")
+        self.assertEqual(detail["relevance_confidence"], "high")
+        self.assertEqual(review.call_count, 2)
+
+    def test_low_vision_candidate_is_rejected_and_wikimedia_fallback_is_used(self):
+        shot_data = shot(0, "rows of servers humming")
+        shot_data["asset_query"] = "server rack"
+        planner = chain.plan_scenes([shot_data] + [shot(i, "rows of servers humming") for i in range(1, 4)])
+        stock = {
+            "path": "/tmp/irrelevant.mp4", "provider": "pixabay",
+            "asset_id": "pixabay:low", "tags": "servers data center server rack rows humming",
+        }
+        alternate = {
+            "path": "/tmp/alternate.mp4", "provider": "coverr",
+            "asset_id": "coverr:server-rack", "tags": "servers data center",
+        }
+        with patch.object(
+            chain, "_env",
+            side_effect=lambda name: "key" if name in {"PIXABAY_API_KEY", "COVERR_API_KEY"} else "",
+        ), patch.object(chain, "_pixabay_asset", side_effect=[stock, None]), patch.object(
+            chain, "_coverr_asset", return_value=alternate,
+        ), patch.object(chain, "_wikimedia_asset", return_value=None), patch.object(
+            chain, "_ai_configured", return_value=False,
+        ), patch.object(
+            vision_review, "review_asset", side_effect=[
+                {"checked": True, "provider": "gemini", "relevance": "low", "reason": "shows a beach"},
+                {"checked": True, "provider": "gemini", "relevance": "high", "reason": "server racks visible"},
+            ],
+        ) as review:
+            detail = chain.resolve_scene(shot_data, self.dir, planner)
+
+        self.assertEqual(detail["provider"], "coverr")
+        self.assertEqual(review.call_count, 2)
+        self.assertEqual(planner["stock_used"], 1)
+        self.assertEqual(len(planner["resolved"]), 1)
+        self.assertEqual(planner["resolved"][0]["provider"], "coverr")
+        self.assertTrue(any("rejected by vision review" in item for item in detail["attempts"]))
+
+    def test_medium_vision_candidate_is_rejected_and_fallback_used(self):
+        shot_data = shot(0, "rows of servers humming")
+        planner = chain.plan_scenes([shot_data] + [shot(i, "rows of servers humming") for i in range(1, 4)])
+        stock = {
+            "path": "/tmp/uncertain.mp4", "provider": "pixabay",
+            "asset_id": "pixabay:medium", "tags": "servers data center server rack rows humming",
+        }
+        with patch.object(
+            chain, "_env",
+            side_effect=lambda name: "key" if name == "PIXABAY_API_KEY" else "",
+        ), patch.object(chain, "_pixabay_asset", return_value=stock), patch.object(
+            chain, "_ai_configured", return_value=False
+        ), patch.object(
+            vision_review, "review_asset",
+            return_value={"checked": True, "provider": "gemini", "relevance": "medium", "reason": "uncertain context"},
+        ) as review:
+            detail = chain.resolve_scene(shot_data, self.dir, planner)
+
+        self.assertEqual(detail["provider"], "motion_graphic")
+        self.assertGreaterEqual(review.call_count, 1)
+        self.assertIn("medium relevance", "; ".join(detail["attempts"]))
+        self.assertEqual(planner["stock_used"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_keyless_pollinations_is_available_to_strong_pipeline(monkeypatch):
+    for name in ("POLLINATIONS_API_KEY", "GEMINI_API_KEY", "FAL_KEY",
+                 "REPLICATE_API_TOKEN", "OPENAI_API_KEY", "CF_ACCOUNT_ID",
+                 "CF_API_TOKEN", "VISUAL_PROVIDER", "POLLINATIONS_ENABLED",
+                 "AI_IMAGE_FALLBACK"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("POLLINATIONS_ENABLED", "true")
+    assert chain._ai_configured() is True
+
+
+def test_vision_review_retries_rate_limit_and_returns_attempt_count(monkeypatch):
+    monkeypatch.setenv("VISION_REVIEW_MAX_RETRIES", "2")
+    monkeypatch.setenv("VISION_REVIEW_BACKOFF_SECONDS", "0.1")
+    first = Mock(status_code=429, headers={"Retry-After": "0.1"})
+    second = Mock(status_code=200, headers={})
+    with patch.object(vision_review.requests, "post", side_effect=[first, second]) as post, patch.object(
+        vision_review.time, "sleep"
+    ):
+        response, attempts = vision_review._post_with_backoff(
+            "https://example.invalid", headers={}, json_body={}, timeout=1
+        )
+    assert response is second
+    assert attempts == 2
+    assert post.call_count == 2
+
+
+def test_vision_review_exhausted_429_is_explicitly_rate_limited(monkeypatch):
+    monkeypatch.setenv("VISION_REVIEW_PROVIDER", "groq")
+    monkeypatch.setenv("GROQ_API_KEY", "test-key")
+    monkeypatch.setenv("VISION_REVIEW_MAX_RETRIES", "1")
+    monkeypatch.setenv("VISION_REVIEW_BACKOFF_SECONDS", "0.1")
+    monkeypatch.setenv("GROQ_VISION_MIN_INTERVAL_SECONDS", "0")
+    response = Mock(status_code=429, headers={"Retry-After": "0"})
+    with patch.object(vision_review, "_first_frame", return_value=(b"frame", "image/jpeg")), patch.object(
+        vision_review.requests, "post", return_value=response
+    ), patch.object(vision_review.time, "sleep"):
+        result = vision_review.review_asset({"narration": "server hardware"}, {"path": "/tmp/x.mp4"})
+    assert result["checked"] is False
+    assert result["status"] == "rate_limited"
+    assert result["attempts"] == 2
+
+
+def test_unreviewed_external_visual_requires_storyboard_review():
+    reasons = storyboard._review_reasons(
+        {"narration": "A server rack"},
+        {"provider": "pixabay", "relevance_confidence": "high", "vision_review": {"checked": False}},
+        Path("/tmp/asset.mp4"),
+    )
+    assert any("not received a successful visual review" in reason for reason in reasons)
+
+
+def test_moe_visual_plan_limits_graphics_and_consecutive_cards():
+    narration = [
+        "A token arrives at the transformer input.",
+        "The router scores each expert for this token.",
+        "The model sends the token to two specialists.",
+        "GPU servers process the selected expert networks.",
+        "The experts compute different parts of the response.",
+        "Their outputs are combined before the next layer.",
+        "Data center hardware supplies the compute.",
+        "The final token continues through the model.",
+    ]
+    plan = chain.plan_scenes([
+        {"index": i, "narration": text, "caption": text, "asset_query": text, "duration": 2.5}
+        for i, text in enumerate(narration)
+    ])
+    types = [plan["scenes"][i]["visual_type"] for i in range(len(narration))]
+    assert sum(kind == "motion_graphic" for kind in types) <= len(types) // 2
+    longest_run = run = 0
+    for kind in types:
+        run = run + 1 if kind == "motion_graphic" else 0
+        longest_run = max(longest_run, run)
+    assert longest_run <= 2
+
+
+def test_passive_token_routing_is_not_flagged_no_action():
+    beat = beats.analyse_beat("Tokens are routed to the two most relevant experts.")
+    assert beat.action in {"routes", "routed", "is routed", "are routed"}
+    assert "no_action" not in beat.flags
+
+
+def test_high_relevance_but_low_quality_asset_is_rejected():
+    shot_data = shot(0, "server rack data center hardware")
+    planner = chain.plan_scenes([shot_data, shot(1, "server racks at night"), shot(2, "data center cooling"), shot(3, "GPU compute")])
+    planner["stock_cap"] = 2
+    planner["scenes"][0]["allow_stock"] = True
+    stock = {
+        "path": "/tmp/low-quality.mp4", "provider": "pixabay",
+        "asset_id": "pixabay:low-quality", "tags": "servers data center server rack",
+    }
+    with patch.object(
+        chain, "_env",
+        side_effect=lambda name: "key" if name == "PIXABAY_API_KEY" else "",
+    ), patch.object(chain, "_pixabay_asset", return_value=stock), patch.object(
+        chain, "_wikimedia_asset", return_value=None
+    ), patch.object(chain, "_ai_configured", return_value=False), patch.object(
+        vision_review, "review_asset",
+        return_value={
+            "checked": True, "status": "reviewed", "relevance": "high",
+            "quality": "low", "reason": "blurry and poorly exposed",
+        },
+    ):
+        detail = chain.resolve_scene(shot_data, Path("/tmp"), planner)
+    # the flagged candidate is rejected; the fallback keeps its visual reason
+    assert detail["provider"] == "motion_graphic"
+    assert "low visual quality" in "; ".join(detail["attempts"])
+
+
+def test_explicitly_disabled_image_provider_is_not_configured(monkeypatch):
+    monkeypatch.setenv("VISUAL_PROVIDER", "off")
+    assert chain._ai_configured() is False
+
+
+def test_ai_image_fallback_can_be_disabled_even_when_a_key_is_configured(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setenv("AI_IMAGE_FALLBACK", "off")
+    assert chain._ai_configured() is False
+
+
+def test_gemini_live_smoke_for_current_benchmark_asset():
+    if os.getenv("ND_RUN_GEMINI_LIVE") != "1":
+        import pytest
+        pytest.skip("set ND_RUN_GEMINI_LIVE=1 to call the configured Gemini vision API")
+    asset_path = Path(
+        "outputs/runs/20261115-153029-how-mixture-of-experts-models-route-toke/shots/stock_pixabay_002.mp4"
+    )
+    assert asset_path.is_file()
+    result = vision_review.review_asset(
+        {
+            "narration": "GPU servers power large language models",
+            "visual_purpose": "show data center hardware",
+            "scene_type": "footage",
+        },
+        {"path": str(asset_path), "provider": "pixabay", "query": "GPU server racks"},
+    )
+    print(result)
+    assert result.get("checked") is True
+
+
+class TopicSpecificVisualRelevanceTests(unittest.TestCase):
+    def test_generic_panda_match_is_rejected_for_one_giant_query(self):
+        result = chain.validate_asset_relevance(
+            {"narration": "Instead of one giant network", "search_query": "one giant"},
+            {"provider": "pixabay", "query": "one giant", "title": "Giant Panda", "tags": "giant panda animal"},
+        )
+        self.assertEqual(result["relevance_confidence"], "low")
+
+    def test_generic_machine_learning_match_is_rejected(self):
+        result = chain.validate_asset_relevance(
+            {"narration": "The model uses specialized experts", "search_query": "machine learning laboratory"},
+            {"provider": "pixabay", "query": "machine learning laboratory", "title": "Industrial Landfill", "tags": "machine learning infographic landfill"},
+        )
+        self.assertEqual(result["relevance_confidence"], "low")
+
+    def test_moe_asset_needs_two_topic_specific_terms(self):
+        result = chain.validate_asset_relevance(
+            {"narration": "A mixture of experts routes tokens", "search_query": "mixture of experts neural network architecture diagram"},
+            {"provider": "pixabay", "query": "mixture of experts neural network architecture diagram", "title": "Mixture of Experts Neural Network", "tags": "mixture experts router"},
+        )
+        self.assertEqual(result["relevance_confidence"], "medium")
+        self.assertIn("expert", result["matched_terms"])
+
+    def test_pixabay_picker_prefers_topic_terms_over_panda_keyword_overlap(self):
+        hits = [
+            {"id": "panda", "duration": 8, "width": 720, "height": 1280, "tags": "giant panda animal"},
+            {"id": "moe", "duration": 8, "width": 720, "height": 1280, "tags": "mixture experts router token routing"},
+        ]
+        picked = chain._pick_hit(hits, "mixture of experts token routing diagram")
+        self.assertEqual(picked["id"], "moe")
+
+    def test_moe_diagram_is_resolved_locally_before_stock_search(self):
+        shot_data = {
+            "index": 0,
+            "duration": 4.0,
+            "topic": "How AI Models Activate a Few Experts to Save Compute",
+            "beat_label": "mechanism",
+            "claim": "A router sends each token to selected experts",
+            "caption": "A router sends each token to selected experts",
+            "visual": "token routing through specialist experts",
+            "asset_query": "mixture of experts token routing diagram",
+            "asset_query_variants": [],
+        }
+        scene = chain.build_scene_brief(shot_data, index=0)
+        self.assertEqual(scene["scene_type"], "diagram")
+        planner = {"scenes": {0: scene}, "used_asset_ids": set(), "resolved": []}
+        with tempfile.TemporaryDirectory() as td:
+            with patch.object(chain, "_pixabay_asset", side_effect=AssertionError("stock must not be searched for a local diagram")):
+                resolved = chain.resolve_scene(shot_data, Path(td), planner)
+        self.assertEqual(resolved["provider"], "motion_graphic")
+        self.assertEqual(resolved["card_variant"], "moe_diagram")
+        self.assertEqual(resolved["relevance_confidence"], "high")
+
+
+    def test_explicit_moe_diagram_query_selects_graphic_and_duplicate_becomes_typography(self):
+        topic = "How AI Models Activate a Few Experts to Save Compute"
+        narration = "In Mixtral's configuration, sparse routing selects a subset for each token."
+        base = {
+            "duration": 3.5,
+            "topic": topic,
+            "claim": narration,
+            "caption": "Sparse routing selects a subset",
+            "visual": "Token routing through specialist experts",
+            "asset_query": "mixture of experts token routing diagram",
+        }
+        classified = chain.classify_scene(base)
+        self.assertEqual(classified["visual_type"], "motion_graphic")
+        self.assertEqual(classified["scene_type"], "diagram")
+        planned = chain.plan_scenes([
+            {**base, "index": 0},
+            {**base, "index": 1},
+        ])
+        self.assertEqual(planned["scene_types"].get("diagram"), 1)
+        self.assertEqual(planned["scene_types"].get("typography"), 1)
+        second = planned["scenes"][1]
+        self.assertEqual(second.get("card_variant"), "typography")
+        self.assertEqual(second.get("typography_title"), "ONLY SELECTED EXPERTS")
+        with tempfile.TemporaryDirectory() as td:
+            resolved = chain.resolve_scene(
+                {**base, "index": 1}, Path(td),
+                {"scenes": {1: second}, "used_asset_ids": set(), "resolved": []},
+            )
+        self.assertEqual(resolved["provider"], "motion_graphic")
+        self.assertEqual(resolved["card_variant"], "typography")
+        self.assertEqual(resolved["relevance_confidence"], "high")
+
+    def test_moe_topic_plan_preserves_beat_level_visual_variety(self):
+        topic = "How AI Models Activate a Few Experts to Save Compute"
+        shots = [
+            {
+                "index": 0, "duration": 3.5, "topic": topic,
+                "claim": "What happens when a token reaches Mixtral?",
+                "caption": "A token reaches the model",
+                "visual": "Cinematic close-up of a processor",
+                "asset_query": "GPU server racks data center",
+            },
+            {
+                "index": 1, "duration": 3.5, "topic": topic,
+                "beat_label": "mechanism",
+                "claim": "A router selects two experts for each token at every layer.",
+                "caption": "Router selects two experts",
+                "visual": "Token routing through specialist experts",
+                "asset_query": "mixture of experts token routing diagram",
+            },
+            {
+                "index": 2, "duration": 3.5, "topic": topic,
+                "claim": "Think of experts as specialist networks inside one model.",
+                "caption": "Specialist networks inside one model",
+                "visual": "A team collaborating in a modern office",
+                "asset_query": "office team collaboration meeting",
+            },
+            {
+                "index": 3, "duration": 3.5, "topic": topic,
+                "claim": "The model keeps all of its parameters in memory.",
+                "caption": "Model parameters occupy memory",
+                "visual": "Close-up of GPU memory modules",
+                "asset_query": "GPU memory modules close up",
+            },
+        ]
+        planned = chain.plan_scenes(shots)
+        self.assertEqual(planned["scene_types"].get("diagram", 0), 2)
+        self.assertGreater(planned["scene_types"].get("footage", 0), 0)
+        self.assertEqual(planned["total"], len(shots))
+        self.assertEqual(
+            sum(1 for scene in planned["scenes"].values()
+                if scene.get("scene_type") == "diagram"),
+            2,
+        )
+
+    def test_generic_moe_capacity_narration_is_not_forced_into_repeated_diagram(self):
+        shot_data = {
+            "index": 5,
+            "duration": 3.6,
+            "topic": "How AI Models Activate a Few Experts to Save Compute",
+            "claim": "This gives you the knowledge capacity of a huge model with the cost of a smaller one.",
+            "caption": "Knowledge capacity with the cost of a smaller model",
+            "visual": "capacity and efficiency of the model",
+            "asset_query": "knowledge capacity model efficiency",
+            "asset_query_variants": [
+                "researcher working with neural network visualization",
+                "GPU server room cinematic footage",
+            ],
+        }
+        scene = chain.build_scene_brief(shot_data, index=5)
+        planner = {"scenes": {5: scene}, "used_asset_ids": set(), "resolved": []}
+        with tempfile.TemporaryDirectory() as td:
+            with patch.object(
+                chain, "_moe_diagram_graphic",
+                side_effect=AssertionError("generic supporting narration must not force the MoE diagram"),
+            ):
+                resolved = chain.resolve_scene(shot_data, Path(td), planner, dry_run=True)
+        self.assertNotEqual(resolved.get("card_variant"), "moe_diagram")
+        self.assertEqual(resolved["provider"], "motion_graphic")
+        self.assertTrue(any("dry run" in attempt for attempt in resolved["attempts"]))
+
+    def test_moe_analogy_and_memory_beats_keep_their_own_visual_treatment(self):
+        shots = [
+            {
+                "index": 3,
+                "duration": 3.6,
+                "topic": "How AI Models Activate a Few Experts to Save Compute",
+                "beat_label": "evidence",
+                "claim": "Every employee in a company answering every email is inefficient.",
+                "caption": "Every employee answers every email",
+                "visual": "company email overload analogy",
+                "asset_query": "modern office building",
+            },
+            {
+                "index": 11,
+                "duration": 3.6,
+                "topic": "How AI Models Activate a Few Experts to Save Compute",
+                "beat_label": "implication",
+                "claim": "The full model still requires memory to store all parameters.",
+                "caption": "Memory footprint remains large",
+                "visual": "model memory storage limitation",
+                "asset_query": "computer memory modules",
+            },
+        ]
+        for shot_data in shots:
+            planner = {"scenes": {shot_data["index"]: chain.build_scene_brief(shot_data, index=shot_data["index"])}, "used_asset_ids": set(), "resolved": []}
+            with tempfile.TemporaryDirectory() as td:
+                with patch.object(
+                    chain, "_moe_diagram_graphic",
+                    side_effect=AssertionError("analogy and limitation beats must not be forced into the same diagram"),
+                ):
+                    resolved = chain.resolve_scene(shot_data, Path(td), planner, dry_run=True)
+            self.assertEqual(resolved["provider"], "motion_graphic")
+            self.assertNotEqual(resolved.get("card_variant"), "moe_diagram")
+
+
+class MoEStillQueryTests(unittest.TestCase):
+    def test_context_queries_are_specific_and_searchable(self):
+        intro = chain._moe_context_still_queries(
+            {"narration": "Mixtral is a sparse mixture-of-experts model with open weights."},
+            "mixture experts expert",
+        )
+        token = chain._moe_context_still_queries(
+            {"narration": "Each token passes through another transformer layer."},
+            "mixture experts expert",
+        )
+        specialist = chain._moe_context_still_queries(
+            {"narration": "Think of the experts as specialist networks inside one model."},
+            "mixture experts expert",
+        )
+        self.assertEqual(intro, ["GPU server", "data center"])
+        self.assertEqual(token, ["transformer architecture", "neural network"])
+        self.assertEqual(specialist, ["neural network", "artificial neural network"])
+
+    def test_non_moe_scene_does_not_receive_moe_fallback_queries(self):
+        self.assertEqual(
+            chain._moe_context_still_queries({"narration": "A factory robot sorts packages."}, "factory robot"),
+            [],
+        )
+
+
+
+
+def test_generated_video_sidecar_is_verified_and_requires_editorial_review(tmp_path, monkeypatch):
+    import hashlib
+    import json
+
+    media = tmp_path / "generated.mp4"
+    media.write_bytes(b"generated clip bytes")
+    record = {
+        "schema": "nextdecode.generated-video-asset.v1",
+        "provider": "kling", "model": "kling-test", "task_id": "task-1",
+        "run_id": "run-1", "local_path": str(media.resolve()),
+        "sha256": hashlib.sha256(media.read_bytes()).hexdigest(),
+        "status": "qualified", "requires_editorial_review": True,
+        "prompt": "a relevant data center scene",
+        "metadata": {"width": 720, "height": 1280, "size_bytes": media.stat().st_size},
+    }
+    media.with_suffix(".mp4.asset.json").write_text(json.dumps(record))
+    from app.providers import video_generation_workflow
+    monkeypatch.setattr(video_generation_workflow, "_probe_video", lambda path: {
+        "width": 720, "height": 1280, "size_bytes": media.stat().st_size,
+        "duration_seconds": 5.0, "fps": "30/1",
+    })
+    shot_data = {
+        "index": 0, "claim": "A relevant data center scene is shown",
+        "caption": "Data center", "visual": "Data center server racks",
+        "asset_query": "data center server racks",
+        "generated_video_asset": str(media),
+    }
+    planner = chain.plan_scenes([shot_data])
+    detail = chain.resolve_scene(shot_data, tmp_path / "work", planner, dry_run=True)
+    assert detail["provider"] == "generated_video"
+    assert detail["path"] == str(media.resolve())
+    assert detail["generated_provenance"]["sha256"] == record["sha256"]
+    assert detail["semantic_review"] is True
+    assert detail["relevance_confidence"] == "medium"
+
+
+def test_generated_video_sidecar_hash_mismatch_falls_back_without_consuming_media(tmp_path):
+    import json
+
+    media = tmp_path / "generated.mp4"
+    media.write_bytes(b"tampered clip bytes")
+    record = {
+        "schema": "nextdecode.generated-video-asset.v1",
+        "provider": "kling", "model": "kling-test", "task_id": "task-1",
+        "local_path": str(media.resolve()), "sha256": "0" * 64,
+        "status": "qualified", "requires_editorial_review": True,
+        "metadata": {"width": 720, "height": 1280, "size_bytes": media.stat().st_size},
+    }
+    media.with_suffix(".mp4.asset.json").write_text(json.dumps(record))
+    shot_data = {
+        "index": 0, "claim": "A data center is shown", "caption": "Data center",
+        "visual": "Data center server racks", "asset_query": "data center server racks",
+        "generated_video_asset": str(media),
+    }
+    planner = chain.plan_scenes([shot_data])
+    detail = chain.resolve_scene(shot_data, tmp_path / "work", planner, dry_run=True)
+    assert detail["provider"] != "generated_video"
+    assert detail["path"] != str(media.resolve())
+
+
+class CreativeDirectionBriefTests(unittest.TestCase):
+    def test_explicit_visual_family_and_camera_language_reach_scene_brief(self):
+        shot_spec = {
+            "index": 2, "text": "A scientist studies the result",
+            "visual_family": "real_footage", "shot_size": "close_up",
+            "camera_angle": "low_angle", "camera_movement": "slow_push_in",
+            "camera_instruction": "close up low angle camera",
+            "visual_style": "documentary", "editing_rhythm": "breathing_room",
+            "transition_intent": "match_cut", "continuity_group": "research:result",
+            "duration": 2.5, "asset_query_variants": ["scientist examining research results close up"],
+        }
+        brief = chain.build_scene_brief(shot_spec)
+        self.assertEqual(brief["scene_type"], "footage")
+        self.assertEqual(brief["shot_size"], "close_up")
+        self.assertEqual(brief["camera_angle"], "low_angle")
+        self.assertEqual(brief["camera_movement"], "slow_push_in")
+        self.assertEqual(brief["transition_intent"], "match_cut")
+        self.assertEqual(brief["continuity_group"], "research:result")
+        self.assertIn("scientist examining research results close up", brief["queries"])
+
+    def test_explicit_diagram_family_overrides_ambient_footage_classifier(self):
+        result = chain.classify_scene({"text": "A router selects the best expert", "visual_family": "diagram"})
+        self.assertEqual(result["scene_type"], "diagram")
+        self.assertEqual(result["visual_type"], "motion_graphic")
+
+def test_local_vector_component_fallback_creates_topic_relevant_map_diagram(tmp_path):
+    from app.visuals.chain import _local_component_asset
+
+    shot = {
+        "topic": "Protomaps self-hosted map tiles",
+        "claim": "Download the PMTiles file and upload it to the CDN.",
+        "visual_subject": "vector map tiles and CDN infrastructure",
+        "visual_action": "map tile layers loading from a self-hosted CDN server",
+    }
+    scene = {
+        "scene_type": "diagram",
+        "visual_subject": shot["visual_subject"],
+        "visual_action": shot["visual_action"],
+        "narration": shot["claim"],
+    }
+    result = _local_component_asset(shot, scene, tmp_path, 0)
+    assert result is not None
+    assert result["generated_locally"] is True
+    assert result["external_api_used"] is False
+    assert Path(result["path"]).is_file()
+    assert result["scene_type"] == "diagram"

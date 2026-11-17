@@ -26,7 +26,8 @@ def test_plan_dependencies_are_respected_and_plan_completes(tmp_path):
     claimed = store.claim("other-worker")
     assert claimed["task_id"] == first
     assert store.claim("other-worker") is None
-    store.finish(first, "other-worker", TaskResult("succeeded", {"ok": True}))
+    store.finish(first, "other-worker", TaskResult("succeeded", {"ok": True}),
+                 attempt=claimed["attempts"])
     assert worker.run_once()
     plan = store.get_plan("p1")
     assert plan["status"] == "succeeded"
@@ -41,7 +42,8 @@ def test_failed_dependency_blocks_descendant(tmp_path):
         {"task_id": second, "task_type": "step.second", "payload": {}, "depends_on": [first]},
     ], {"schema_version": "nextdecode.autonomy.plan.v1"})
     claimed = store.claim("worker")
-    store.finish(first, "worker", TaskResult("failed", error_code="expected_failure"))
+    store.finish(first, "worker", TaskResult("failed", error_code="expected_failure"),
+                 attempt=claimed["attempts"])
     assert store.claim("worker") is None
     assert store.get(second)["status"] == "blocked"
     assert store.get_plan("p2")["status"] == "failed"
@@ -122,7 +124,8 @@ def test_failed_branch_does_not_mark_plan_terminal_while_independent_work_is_que
 
     first = store.claim("worker")
     assert first["task_id"] == failed
-    store.finish(failed, "worker", TaskResult("failed", error_code="expected_failure"))
+    store.finish(failed, "worker", TaskResult("failed", error_code="expected_failure"),
+                 attempt=first["attempts"])
 
     in_progress = store.get_plan("p3")
     assert in_progress["status"] == "queued"
@@ -130,7 +133,8 @@ def test_failed_branch_does_not_mark_plan_terminal_while_independent_work_is_que
 
     second = store.claim("worker")
     assert second["task_id"] == independent
-    store.finish(independent, "worker", TaskResult("succeeded", {"ok": True}))
+    store.finish(independent, "worker", TaskResult("succeeded", {"ok": True}),
+                 attempt=second["attempts"])
     assert store.claim("worker") is None  # propagates the failed prerequisite to its child
 
     terminal = store.get_plan("p3")
@@ -228,3 +232,53 @@ def test_complex_workflow_rejects_model_invented_shell_capability(tmp_path, monk
     )
     assert not decision.accepted
     assert decision.reason == "unsupported plan capability"
+
+
+def test_planner_carries_verified_studio_snapshot_through_research_script_dag(tmp_path):
+    import hashlib
+    snapshot = {
+        "schema": "nextdecode.studio.storyboard.v1",
+        "title": "AI Accelerates Research?",
+        "beats": [
+            {"id": 1, "name": "Hook", "start": 0, "end": 4, "kind": "Kinetic typography",
+             "description": "Open with a sharp question.", "caption": "Does AI speed up research?"},
+        ],
+    }
+    digest = hashlib.sha256(json.dumps(snapshot, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+    version_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    decision = TaskPlanner(TaskStore(tmp_path / "tasks.db")).propose(
+        "Create a YouTube Short about AI agents",
+        studio_version_id=version_id,
+        studio_content_sha256=digest,
+        studio_snapshot=snapshot,
+    )
+    assert decision.accepted, decision.reason
+    research, script = decision.plan["nodes"]
+    assert research["payload"]["studio_version_id"] == version_id
+    assert research["payload"]["studio_content_sha256"] == digest
+    assert research["payload"]["studio_snapshot"] == snapshot
+    assert script["payload"] == {
+        "topic": "AI agents",
+        "studio_version_id": version_id,
+        "studio_content_sha256": digest,
+    }
+    assert script["depends_on"] == [research["task_id"]]
+    assert decision.plan["human_approval_required"] is True
+    assert decision.plan["external_actions_allowed"] is False
+
+
+def test_planner_rejects_studio_snapshot_digest_mismatch(tmp_path):
+    snapshot = {
+        "schema": "nextdecode.studio.storyboard.v1",
+        "title": "AI",
+        "beats": [{"id": 1, "name": "Hook", "start": 0, "end": 4,
+                   "kind": "Text", "description": "Open", "caption": "AI"}],
+    }
+    decision = TaskPlanner(TaskStore(tmp_path / "tasks.db")).propose(
+        "Create a YouTube Short about AI",
+        studio_version_id="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        studio_content_sha256="b" * 64,
+        studio_snapshot=snapshot,
+    )
+    assert not decision.accepted
+    assert "SHA-256 verification failed" in decision.reason

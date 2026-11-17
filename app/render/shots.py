@@ -55,8 +55,19 @@ def render_shot(shot: dict, asset_path: Path | None, work_dir: Path, *,
     work_dir = Path(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
     index = int(shot.get("index", 0))
-    duration = float(shot.get("duration", 3.0))
-    frames = max(1, int(round(duration * fps)))
+    declared_duration = float(shot.get("duration", 3.0))
+    if "start" in shot and "end" in shot:
+        # Allocate each segment from the shared absolute frame clock. Rounding
+        # each duration independently can lose frames across many short shots.
+        start_frame = int(round(float(shot.get("start", 0.0)) * fps))
+        end_frame = int(round(float(shot.get("end", 0.0)) * fps))
+        frames = end_frame - start_frame
+        if frames <= 0:
+            raise ValueError(f"shot {index} has a non-positive frame allocation")
+        duration = frames / fps
+    else:
+        frames = max(1, int(round(declared_duration * fps)))
+        duration = frames / fps
     out = work_dir / f"shot_{index:03d}.mp4"
     filter_str = build_ken_burns_filter(shot, width=width, height=height, fps=fps)
     has_video_asset = _looks_like_video(asset_path)

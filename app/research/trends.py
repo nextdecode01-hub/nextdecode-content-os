@@ -334,7 +334,7 @@ def _candidate(title: str, source_url: str, source: str, rank: int, score: float
     if not clean_title:
         return None
     url = str(source_url or "").strip()
-    return {
+    candidate = {
         "title": clean_title[:300],
         "source_url": url,
         "url": url,
@@ -346,6 +346,8 @@ def _candidate(title: str, source_url: str, source: str, rank: int, score: float
         "platforms": list(platforms or [source]),
         "raw": raw or {},
     }
+    candidate["relevance"] = classify_relevance(candidate)
+    return candidate
 
 
 def _context_text(candidate: dict[str, Any]) -> str:
@@ -360,8 +362,74 @@ def _context_text(candidate: dict[str, Any]) -> str:
     return " ".join(parts)
 
 
+# Emerging technology vocabulary is intentionally broader than the core
+# keyword list. These concepts are often named before they become common terms.
+EXPERIMENTAL_TERMS = re.compile(
+    r"\b(world model|spatial computing|neuromorphic|photonic computing|"
+    r"brain[- ]computer interface|synthetic biology|quantum internet|"
+    r"quantum networking|embodied ai|physical ai|edge ai|on-device ai|"
+    r"agentic workflow|multi-agent system|digital twin|fusion energy|"
+    r"solid[- ]state battery|perovskite|post-quantum|confidential computing|"
+    r"zero[- ]knowledge proof|decentralized identity|"
+    r"programmable matter|soft robotics|swarm robotics|"
+    r"autonomous lab|self-driving lab|biofoundry|"
+    r"spatial web|ambient computing|retrieval[- ]augmented|"
+    r"test[- ]time compute|mixture of experts|model context protocol|"
+    r"vibe coding|computer use|robot foundation model|"
+    r"vision[- ]language[- ]action|small language model|liquid neural network)\b",
+    re.I,
+)
+ADJACENT_TERMS = re.compile(
+    r"\b(climate tech|energy storage|smart grid|precision agriculture|"
+    r"agritech|health tech|medtech|digital health|industrial automation|"
+    r"advanced manufacturing|geospatial technology|mapping platform|"
+    r"financial technology|fintech infrastructure|telecommunications|"
+    r"6g network|satellite internet|carbon capture|materials science|"
+    r"scientific instrument|research infrastructure|education technology|"
+    r"edtech|mobility technology|electric aviation|"
+    r"semiconductor supply chain|critical minerals|data governance|"
+    r"digital public infrastructure)\b",
+    re.I,
+)
+CLEARLY_UNRELATED_TERMS = re.compile(
+    r"\b(football match|cricket match|ipl score|celebrity gossip|"
+    r"movie review|film review|music chart|album review|reality show|"
+    r"fashion week|beauty pageant|horoscope|lottery results|weather forecast)\b",
+    re.I,
+)
+
+
+def classify_relevance(candidate: dict[str, Any]) -> dict[str, Any]:
+    """Classify relevance without treating unknown vocabulary as irrelevant.
+
+    Unclassified candidates are deliberately retained for downstream review.
+    Only a clear non-technology signal can be marked unrelated.
+    """
+    text = _context_text(candidate)
+    if EXPERIMENTAL_TERMS.search(text):
+        category, confidence, reason = "experimental", 0.80, "emerging technology concept; vocabulary may be new"
+    elif ADJACENT_TERMS.search(text):
+        category, confidence, reason = "adjacent", 0.75, "technology-adjacent sector or enabling infrastructure"
+    elif TECH_TERMS.search(text):
+        category, confidence, reason = "core", 0.95, "recognized core AI/technology vocabulary"
+    elif CLEARLY_UNRELATED_TERMS.search(text):
+        category, confidence, reason = "unrelated", 0.90, "clear non-technology topic signal"
+    else:
+        category, confidence, reason = "unclassified", 0.20, "insufficient lexical evidence; retain for editorial review"
+    matches = []
+    for pattern in (TECH_TERMS, EXPERIMENTAL_TERMS, ADJACENT_TERMS, CLEARLY_UNRELATED_TERMS):
+        matches.extend(match.group(0).lower() for match in pattern.finditer(text))
+    return {
+        "category": category,
+        "confidence": confidence,
+        "reason": reason,
+        "matched_terms": list(dict.fromkeys(matches))[:8],
+    }
+
+
 def _is_relevant(candidate: dict[str, Any]) -> bool:
-    return bool(TECH_TERMS.search(_context_text(candidate)))
+    """Keep core, adjacent, experimental and uncertain candidates for review."""
+    return classify_relevance(candidate)["category"] != "unrelated"
 
 
 WIKIPEDIA_SOURCE_LABELS = {"wikipedia", "wiki", "wikipedia trending"}
@@ -1144,6 +1212,8 @@ def fetch_all(sources: Any = None, include_general: bool = False) -> dict[str, A
                 errors[name] = "no candidates returned"
     if not include_general:
         candidates = [item for item in candidates if _is_relevant(item)]
+        for item in candidates:
+            item["relevance"] = classify_relevance(item)
     # Wikipedia/Wikimedia entries reach this aggregator through the default source
     # list, other feeds and the on-disk feed cache; the research-source policy excludes
     # them from discovery (selector applies the same rule at scoring time).
@@ -1362,6 +1432,8 @@ def rank_candidates(candidates: Any, include_general: bool = False,
     working = [dict(item) for item in candidates if isinstance(item, dict)]
     if not include_general:
         working = [item for item in working if _is_relevant(item)]
+    for item in working:
+        item["relevance"] = classify_relevance(item)
     working = _dedupe_same_source(working)
     used = _load_used_topics(used_topics_file)
     kept: list[dict[str, Any]] = []
@@ -1441,8 +1513,8 @@ def summarize_trends(candidates: Any, k: int = 3) -> list[dict[str, Any]]:
     shortlist = pool[:max(limit * 3, limit)]
     try:
         from app.providers import multi_model_ai
-        payload = multi_model_ai.generate_json(_summary_prompt(shortlist, limit),
-                                               temperature=0.7, timeout=120)
+        payload = multi_model_ai.generate_for_task_json("research_synthesis", _summary_prompt(shortlist, limit),
+                                                        temperature=0.7, timeout=120)
     except Exception:
         return [dict(item, enriched=False) for item in pool[:limit]]
     picks = _extract_picks(payload)

@@ -56,10 +56,7 @@ Apply the owner-approved collaboration model recorded on 2026-11-05; it supersed
 
 - **ChatGPT:** architecture, direct implementation, integration, debugging, test execution, and technical review.
 - **OpenCode:** engineering partner for independent implementation, backend/API work, alternatives, review, and debugging.
-- **Qoder:** additional implementation partner for focused contributions; not the sole writer or sole implementation owner.
-- **Kilo:** independent, read-only security acceptance after implementation and evidence are complete, with separate explicit owner authorization.
 - **Copilot:** focused regression-test review.
-- **Antigravity:** targeted product/UI work only.
 
 Use one active writer per file at a time. Parallel work is allowed only across independent files/packages with shared versioned contracts; cross-review, integration, and regression evidence are required before acceptance. ChatGPT, OpenCode, and Qoder may all contribute, but must coordinate file ownership and avoid concurrent edits to the same file.
 

@@ -336,7 +336,7 @@ class ProducerStampOrderTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
 
-            def fake_strong(topic, work_dir, metadata_file):
+            def fake_strong(topic, work_dir, metadata_file, **_kwargs):
                 (work_dir / "output_short.mp4").write_bytes(LARGE_VIDEO)
                 return {"title": "Stamp Order", "topic": "stamp order",
                         "voice_text": "text", "video_path": "output_short.mp4"}
@@ -356,6 +356,12 @@ class ProducerStampOrderTests(unittest.TestCase):
             manifest = json.loads((runs[0] / "manifest.json").read_text(encoding="utf-8"))
             self.assertEqual(manifest["status"], "ok")
             failure.assert_not_called()
+            metadata_stage = next(
+                item for item in manifest["stages"]
+                if item["name"] == "metadata_persistence"
+            )
+            self.assertEqual(metadata_stage["status"], "ok")
+            self.assertEqual(manifest["artifacts"]["metadata"]["stage"], "metadata_persistence")
             stamped = json.loads((runs[0] / "metadata.json").read_text(encoding="utf-8"))
             self.assertEqual(stamped["governance"]["entry"], "orchestrated")
             self.assertEqual(stamped["governance"]["run_id"], manifest["run_id"])

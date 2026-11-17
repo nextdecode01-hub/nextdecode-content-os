@@ -57,6 +57,7 @@ def build_timeline(
     caption_words_path: Path | None = None,
     motion_plan: list[dict] | None = None,
     storyboard: dict | None = None,
+    edit_decisions: dict[str, Any] | None = None,
     width: int = 1080,
     height: int = 1920,
     fps: int = 30,
@@ -68,6 +69,11 @@ def build_timeline(
         raise ValueError("timeline requires one rendered media segment per shot")
 
     video_clips: list[dict[str, Any]] = []
+    edl_by_index = {
+        int(item.get("shot_index", -1)): item
+        for item in ((edit_decisions or {}).get("clips") or [])
+        if isinstance(item, dict)
+    }
     cursor = 0
     for position, (shot, media_path) in enumerate(zip(shots, shot_files)):
         start = _frame(float(shot.get("start", 0.0)), fps)
@@ -88,6 +94,8 @@ def build_timeline(
         media = _media_ref(Path(media_path))
         if not media or not media["exists"]:
             raise ValueError(f"rendered shot media is missing: {media_path}")
+        edl_clip = edl_by_index.get(int(shot.get("index", position)), {})
+        source_decision = edl_clip.get("source") or {}
         video_clips.append({
             "clip_id": str(shot.get("shot_id") or f"shot-{position:03d}"),
             "shot_index": int(shot.get("index", position)),
@@ -97,10 +105,19 @@ def build_timeline(
             "start_seconds": round(start / fps, 6),
             "end_seconds": round(end / fps, 6),
             "media": media,
-            "source_asset": str(shot.get("asset_path") or ""),
+            "source_asset": str(source_decision.get("path") or shot.get("asset_path") or ""),
             "narration": str(shot.get("claim") or shot.get("caption") or ""),
-            "transition_in": str(shot.get("transition") or "cut"),
-            "motion": dict(shot.get("motion") or {}),
+            # Preserve the v1 string field; richer executable details are additive.
+            "transition_in": str((edl_clip.get("transition_in") or {}).get("type") or shot.get("transition") or "cut"),
+            "transition_in_detail": dict(edl_clip.get("transition_in") or {"type": str(shot.get("transition") or "cut"), "duration_frames": 0}),
+            "transition_out": dict(edl_clip.get("transition_out") or {"type": "cut", "duration_frames": 0}),
+            "source_range": {"in_seconds": source_decision.get("in_seconds", 0.0),
+                             "out_seconds": source_decision.get("out_seconds", duration / fps)},
+            "framing": dict(edl_clip.get("framing") or {}),
+            "edl_clip_id": str(edl_clip.get("clip_id") or ""),
+            "motion": dict(edl_clip.get("motion") or shot.get("motion") or {}),
+            "source_qa": dict(source_decision.get("qa") or {}),
+            "execution_qa": dict(edl_clip.get("execution_qa") or {"status": "not_recorded"}),
         })
         cursor = end
 
@@ -184,6 +201,11 @@ def build_timeline(
             )},
         ],
         "rendered_mix": mixed,
+        "edit_decisions": {
+            "schema": str((edit_decisions or {}).get("schema") or ""),
+            "duration_frames": int((edit_decisions or {}).get("duration_frames") or 0),
+            "clip_count": len((edit_decisions or {}).get("clips") or []),
+        },
         "director": {
             "motion_plan": list(motion_plan or []),
             "storyboard_status": str((storyboard or {}).get("review_status") or "not_generated"),

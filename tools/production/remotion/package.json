@@ -1,0 +1,8 @@
+{
+  "name": "nextdecode-motion-scenes",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {"studio":"remotion studio src/index.jsx","render:demo":"remotion render src/index.jsx NextDecodeDemo out/demo.mp4"},
+  "dependencies": {"@remotion/cli":"^4.0.0","remotion":"^4.0.0","react":"^18.3.1","react-dom":"^18.3.1"}
+}

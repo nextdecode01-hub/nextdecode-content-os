@@ -1,6 +1,6 @@
 """Free, key-free image sourcing for short-form shots.
 
-Stock video APIs (Pexels, Pixabay) need an account and the AI image providers on
+Stock video APIs (Coverr, Pixabay) need an account and the AI image providers on
 this project are quota-limited, which left the renderer falling back to flat
 gradients.  Wikimedia Commons serves freely licensed photographs and diagrams
 through an open API that needs no key, so it is used as the reliable real-image
@@ -11,8 +11,10 @@ can carry proper attribution.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
+import time
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -24,6 +26,8 @@ MIN_WIDTH = 640
 MIN_HEIGHT = 480
 DOWNLOAD_TIMEOUT = 45
 SEARCH_TIMEOUT = 20
+CACHE_DIR = Path(__file__).resolve().parents[2] / "data" / "cache" / "wikimedia"
+CACHE_TTL_SECONDS = 24 * 60 * 60
 
 QUERY_STOPWORDS = frozenset({
     "the", "and", "for", "with", "that", "this", "from", "into", "are", "was",
@@ -55,12 +59,17 @@ def _query_match(item: dict, query: str) -> bool:
     terms = _query_terms(query)
     if not terms:
         return False
-    title_terms = {
+    metadata = " ".join(str(item.get(key) or "") for key in ("title", "object_name", "description"))
+    metadata_terms = {
         _term_stem(word)
-        for word in re.findall(r"[a-z0-9]+", str(item.get("title", "")).lower())
+        for word in re.findall(r"[a-z0-9]+", metadata.lower())
     }
-    matches = sum(1 for term in terms if term in title_terms)
-    return matches == len(terms) if len(terms) == 1 else matches / len(terms) >= 0.6
+    matches = sum(1 for term in terms if term in metadata_terms)
+    if len(terms) == 1:
+        return matches == 1
+    # At least two meaningful subject terms must be present; generic one-word
+    # overlap is not enough to select a Wikimedia still for this beat.
+    return matches >= 2 and matches / len(terms) >= 0.6
 
 
 def _strip_html(value: str) -> str:
@@ -83,7 +92,7 @@ def search_images(query: str, *, limit: int = 6, min_width: int = MIN_WIDTH,
 
     pages: dict[str, dict] = {}
     for search in searches:
-        for page in _search_pages(search, limit=limit):
+        for page in _cached_search_pages(search, limit=limit):
             if page["width"] < min_width or page["height"] < min_height:
                 continue
             pages.setdefault(page.get("title", ""), page)
@@ -126,6 +135,8 @@ def _search_pages(search: str, *, limit: int) -> list[dict]:
         meta = info.get("extmetadata") or {}
         results.append({
             "title": str(page.get("title", "")),
+            "object_name": _strip_html((meta.get("ObjectName") or {}).get("value", ""))[:180],
+            "description": _strip_html((meta.get("ImageDescription") or {}).get("value", ""))[:600],
             "url": str(info.get("url") or ""),
             "thumb_url": str(info.get("thumburl") or info.get("url") or ""),
             "descriptionurl": str(info.get("descriptionurl") or ""),
@@ -136,6 +147,28 @@ def _search_pages(search: str, *, limit: int) -> list[dict]:
             "author": _strip_html((meta.get("Artist") or {}).get("value", ""))[:120],
             "credit": _strip_html((meta.get("Credit") or {}).get("value", ""))[:160],
         })
+    return results
+
+
+def _cached_search_pages(search: str, *, limit: int) -> list[dict]:
+    normalized = " ".join(str(search or "").lower().split())
+    digest = hashlib.sha256(f"wikimedia-search-v1:{normalized}:{int(limit)}".encode("utf-8")).hexdigest()[:20]
+    cache_path = CACHE_DIR / f"{digest}.json"
+    try:
+        cached = json.loads(cache_path.read_text(encoding="utf-8"))
+        if time.time() - float(cached.get("fetched_at", 0)) < CACHE_TTL_SECONDS:
+            return list(cached.get("results") or [])
+    except (OSError, ValueError, TypeError):
+        pass
+    results = _search_pages(search, limit=limit)
+    try:
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(
+            json.dumps({"fetched_at": time.time(), "query": normalized, "results": results}, indent=2),
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
     return results
 
 
@@ -195,6 +228,8 @@ def fetch_shot_image(query: str, work_dir: Path, *, index: int = 0,
                 "path": str(out),
                 "provider": "wikimedia",
                 "title": chosen["title"],
+                "object_name": chosen.get("object_name", ""),
+                "description": chosen.get("description", ""),
                 "license": chosen["license"],
                 "license_url": chosen["license_url"],
                 "author": chosen["author"],

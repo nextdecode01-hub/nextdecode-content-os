@@ -145,7 +145,9 @@ class TaskPlanner:
         return {"summary": summary, "nodes": nodes}, "research_and_script_draft"
 
     def propose(self, goal: str, *, topic: str | None = None, dry_run: bool = True,
-                idempotency_key: str | None = None) -> PlanDecision:
+                idempotency_key: str | None = None, studio_version_id: str | None = None,
+                studio_content_sha256: str | None = None,
+                studio_snapshot: dict | None = None) -> PlanDecision:
         if not isinstance(goal, str) or not goal.strip() or len(goal) > 1000:
             return PlanDecision(False, "goal_must_be_1_to_1000_characters")
         if dry_run is not True:
@@ -160,7 +162,35 @@ class TaskPlanner:
             return PlanDecision(False, "external_publishing_requires_separate_human_approval")
         try:
             topic_value = self._topic(goal, topic)
+            studio_identity = {}
+            if any(value is not None for value in (
+                studio_version_id, studio_content_sha256, studio_snapshot
+            )):
+                from .tasks import validate_topic_payload
+                validated_research = validate_topic_payload({
+                    "topic": topic_value, "max_sources": 4,
+                    "studio_version_id": studio_version_id,
+                    "studio_content_sha256": studio_content_sha256,
+                    "studio_snapshot": studio_snapshot,
+                })
+                studio_identity = {
+                    "studio_version_id": validated_research["studio_version_id"],
+                    "studio_content_sha256": validated_research["studio_content_sha256"],
+                    "studio_snapshot": validated_research["studio_snapshot"],
+                }
             proposal, intent = self._proposal(goal.strip(), topic_value)
+            if studio_identity:
+                for node in proposal.get("nodes", []):
+                    if node.get("task_type") == "research.topic.collect":
+                        node["payload"] = {**node.get("payload", {}), **studio_identity}
+                    elif node.get("task_type") in {
+                        "content.short.script.draft", "content.longform.script.draft"
+                    }:
+                        node["payload"] = {
+                            **node.get("payload", {}),
+                            "studio_version_id": studio_identity["studio_version_id"],
+                            "studio_content_sha256": studio_identity["studio_content_sha256"],
+                        }
             nodes = validate_plan_nodes(proposal, self.registry)
         except (ValueError, PlanValidationError) as exc:
             return PlanDecision(False, str(exc)[:240])

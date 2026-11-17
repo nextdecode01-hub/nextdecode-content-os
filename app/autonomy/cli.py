@@ -13,7 +13,8 @@ from .registry import build_default_registry
 from .store import create_task_store
 from .worker import TaskWorker
 from .worker_lifecycle import reconcile_workers
-from .agent_runtime import agent_runtime_registry, execution_readiness_report
+from .agent_runtime import agent_runtime_registry, execution_readiness_report, AgentReadinessEvidence
+from .agent_assignment import AgentAssignmentPlanner, AssignmentRequest, QualificationRecord
 from .agent_workspace import (
     prepare_workspace, list_workspaces, collect_workspace_changes,
     AgentExecutionAdapter,
@@ -48,6 +49,11 @@ def main(argv=None) -> int:
     sub.add_parser("capabilities")
     agents = sub.add_parser("agents", help="Read-only discovery of local specialist agent CLIs")
     agents.add_argument("--role")
+    sub.add_parser("agent-readiness", help="Read-only agent readiness and qualification report; never invokes agents")
+    assignment_plan = sub.add_parser("agent-assignment-plan", help="Evaluate a plan-only agent assignment from explicit JSON evidence; never invokes agents")
+    assignment_plan.add_argument("--request", required=True, help="JSON assignment request")
+    assignment_plan.add_argument("--readiness-evidence", default="{}", help="JSON readiness evidence keyed by agent ID")
+    assignment_plan.add_argument("--qualification", help="JSON qualification record")
     agent_workspace = sub.add_parser("agent-workspace", help="Prepare and inspect coding-agent workspaces")
     workspace_sub = agent_workspace.add_subparsers(dest="workspace_command", required=True)
     workspace_sub.add_parser("prepare")
@@ -119,6 +125,44 @@ def main(argv=None) -> int:
                 task=args.task, timeout_seconds=args.timeout_seconds,
             ), indent=2))
         return 0
+
+    if args.command == "agent-readiness":
+        print(json.dumps(agent_runtime_registry.readiness(), indent=2))
+        return 0
+
+    if args.command == "agent-assignment-plan":
+        try:
+            request_data = json.loads(args.request)
+            if not isinstance(request_data, dict):
+                raise ValueError("assignment request must be a JSON object")
+            allowed_request_fields = {
+                "assignment_id", "task_id", "agent_id", "capability", "objective",
+                "input_references", "acceptance_criteria", "permission_scope", "correlation_id",
+                "timeout_seconds",
+            }
+            unknown_fields = sorted(set(request_data) - allowed_request_fields)
+            if unknown_fields:
+                raise ValueError("unsupported assignment fields: " + ", ".join(unknown_fields))
+            request_data["input_references"] = tuple(request_data.get("input_references", ()))
+            request_data["acceptance_criteria"] = tuple(request_data.get("acceptance_criteria", ()))
+            request_data["permission_scope"] = tuple(request_data.get("permission_scope", ()))
+            request = AssignmentRequest(**request_data)
+            raw_evidence = json.loads(args.readiness_evidence)
+            if not isinstance(raw_evidence, dict):
+                raise ValueError("readiness evidence must be a JSON object")
+            evidence = {agent_id: AgentReadinessEvidence(**record)
+                        for agent_id, record in raw_evidence.items()}
+            qualification = QualificationRecord(**json.loads(args.qualification)) if args.qualification else None
+            decision = AgentAssignmentPlanner().plan(
+                request, readiness_evidence=evidence, qualification=qualification,
+            )
+            print(json.dumps(decision, indent=2))
+            return 0 if decision["accepted"] else 2
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            print(json.dumps({"status": "denied", "accepted": False,
+                              "denial_reason_codes": ["invalid_assignment_input"],
+                              "detail": str(exc), "process_started": False}, indent=2))
+            return 2
 
     store = _store(args.db)
     if args.command == "enqueue":

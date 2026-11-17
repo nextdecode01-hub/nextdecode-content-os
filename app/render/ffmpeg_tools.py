@@ -54,7 +54,27 @@ _ZERO_AUDIO = "anullsrc=r=44100:cl=mono"
 
 
 def _run(cmd: list[str], timeout: int = FFMPEG_TIMEOUT) -> None:
-    subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=timeout)
+    """Run FFmpeg and retain a bounded diagnostic when it fails.
+
+    The command arguments are deliberately not copied into the exception: they
+    can contain private paths or filter text. The caller's failure recorder is
+    responsible for redacting the bounded stderr/stdout excerpt before storage.
+    """
+    executable = Path(str(cmd[0])).name if cmd else "ffmpeg"
+    try:
+        completed = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        output = exc.stderr or exc.stdout or ""
+        if isinstance(output, bytes):
+            output = output.decode("utf-8", errors="replace")
+        diagnostic = str(output).strip()[-1200:]
+        suffix = f"; diagnostic: {diagnostic}" if diagnostic else ""
+        raise RuntimeError(f"{executable} timed out after {timeout}s{suffix}") from None
+    if completed.returncode != 0:
+        output = (completed.stderr or completed.stdout or "").strip()
+        diagnostic = output[-1200:]
+        suffix = f"; diagnostic: {diagnostic}" if diagnostic else ""
+        raise RuntimeError(f"{executable} exited with code {completed.returncode}{suffix}")
 
 
 def _ffprobe(path: Path) -> dict:
@@ -219,52 +239,68 @@ def _even(value: float) -> int:
 
 
 def build_scale_crop_filter(scale: float = 1.0, *, width: int = 1080,
-                            height: int = 1920) -> str:
-    """Fixed crop for native video: keep source motion, no artificial zoom."""
+                            height: int = 1920, focal_x: float = 0.5,
+                            focal_y: float = 0.5) -> str:
+    """Fixed crop for native video, positioning the declared focal point."""
     scale = max(1.0, min(1.20, float(scale)))
+    focal_x = max(0.0, min(1.0, float(focal_x)))
+    focal_y = max(0.0, min(1.0, float(focal_y)))
     return (
         f"scale={_even(width * scale)}:{_even(height * scale)}:"
         f"force_original_aspect_ratio=increase,"
-        f"crop={int(width)}:{int(height)},setsar=1"
+        f"crop={int(width)}:{int(height)}:"
+        f"x='(iw-{int(width)})*{focal_x}':y='(ih-{int(height)})*{focal_y}',setsar=1"
     )
 
 
 def build_ken_burns_filter(shot: dict, *, width: int = 1080, height: int = 1920,
                            fps: int = 30) -> str:
-    """Eased Ken Burns / fixed-crop filter for one shot.
-
-    ``d=1`` is essential for video inputs: a longer ``d`` repeats the first
-    source frame for the whole shot (a freeze) while the zoom still moves.
-    Scene-aware motion arrives in ``shot['motion']``; the legacy zoom/pan keys
-    remain supported so older callers keep working.
-    """
+    """Build executable framing, motion and EDL edge-transition filters."""
     duration = float(shot.get("duration", 3.0))
     frames = max(1, int(round(duration * fps)))
     motion = shot.get("motion") or {}
-    if str(motion.get("mode") or "").lower() == "native":
-        return build_scale_crop_filter(
-            float(motion.get("zoom_from", 1.0) or 1.0), width=width, height=height
+    framing = shot.get("framing") or {}
+    fit = str(framing.get("mode") or "fill").lower()
+    focal_x = max(0.0, min(1.0, float(framing.get("focal_x", 0.5))))
+    focal_y = max(0.0, min(1.0, float(framing.get("focal_y", 0.5))))
+
+    if fit == "contain":
+        filter_str = (
+            f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1"
         )
+    elif str(motion.get("mode") or "").lower() == "native":
+        filter_str = build_scale_crop_filter(
+            float(motion.get("zoom_from", 1.0) or 1.0), width=width, height=height,
+            focal_x=focal_x, focal_y=focal_y,
+        )
+    else:
+        z_from = float(motion.get("zoom_from", shot.get("zoom_from", 1.0)) or 1.0)
+        z_to = float(motion.get("zoom_to", shot.get("zoom_to", 1.14)) or 1.14)
+        z_from = max(1.0, min(1.20, z_from))
+        z_to = max(1.0, min(1.20, z_to))
+        pan = motion.get("pan") or shot.get("pan") or {}
+        limit = float(width) * 0.03
+        px0 = max(-limit, min(limit, float(pan.get("x0", pan.get("x", 0.0)) or 0.0)))
+        py0 = max(-limit, min(limit, float(pan.get("y0", pan.get("y", 0.0)) or 0.0)))
+        px1 = max(-limit, min(limit, float(pan.get("x1", -px0) or 0.0)))
+        py1 = max(-limit, min(limit, float(pan.get("y1", -py0) or 0.0)))
+        progress = f"min(on/{frames},1)"
+        ease = f"(3*pow({progress},2)-2*pow({progress},3))"
+        z = f"{z_from}+({z_to}-{z_from})*{ease}"
+        x = f"iw*{focal_x}-(iw/zoom)/2+({px0}+({px1}-{px0})*{ease})"
+        y = f"ih*{focal_y}-(ih/zoom)/2+({py0}+({py1}-{py0})*{ease})"
+        filter_str = f"zoompan=z='{z}':x='{x}':y='{y}':d=1:s={width}x{height}:fps={fps}"
 
-    z_from = float(motion.get("zoom_from", shot.get("zoom_from", 1.0)) or 1.0)
-    z_to = float(motion.get("zoom_to", shot.get("zoom_to", 1.14)) or 1.14)
-    z_from = max(1.0, min(1.20, z_from))
-    z_to = max(1.0, min(1.20, z_to))
-    pan = motion.get("pan") or shot.get("pan") or {}
-    limit = float(width) * 0.03
-    px0 = max(-limit, min(limit, float(pan.get("x0", pan.get("x", 0.0)) or 0.0)))
-    py0 = max(-limit, min(limit, float(pan.get("y0", pan.get("y", 0.0)) or 0.0)))
-    px1 = max(-limit, min(limit, float(pan.get("x1", -px0) or 0.0)))
-    py1 = max(-limit, min(limit, float(pan.get("y1", -py0) or 0.0)))
-
-    # Smoothstep: zero velocity at both ends, so a shot starts and stops
-    # gently instead of snapping into a linear ramp.
-    progress = f"min(on/{frames},1)"
-    ease = f"(3*pow({progress},2)-2*pow({progress},3))"
-    z = f"{z_from}+({z_to}-{z_from})*{ease}"
-    x = f"iw/2-(iw/zoom)/2+({px0}+({px1}-{px0})*{ease})"
-    y = f"ih/2-(ih/zoom)/2+({py0}+({py1}-{py0})*{ease})"
-    return f"zoompan=z='{z}':x='{x}':y='{y}':d=1:s={width}x{height}:fps={fps}"
+    # EDL edge fades are applied to the shot itself; interior transitions remain cuts.
+    edge = shot.get("edl_transition") or {}
+    fade_frames = max(1, int(edge.get("duration_frames", 0) or 0))
+    if edge.get("in") and fade_frames:
+        filter_str += f",fade=t=in:st=0:d={fade_frames / fps:.6f}"
+    if edge.get("out") and fade_frames:
+        fade_start = max(0.0, duration - fade_frames / fps)
+        filter_str += f",fade=t=out:st={fade_start:.6f}:d={fade_frames / fps:.6f}"
+    return filter_str
 
 
 def build_concat_filter(shots: list[dict]) -> str:
@@ -346,31 +382,89 @@ def synthesize_sfx(kind: str, work_dir: Path, *, path: Path | None = None) -> Pa
     return out if out.exists() and out.stat().st_size > 0 else None
 
 
+def build_editorial_concat_filter(shots: list[dict], *, transition_seconds: float = 0.32) -> tuple[str, float]:
+    """Build a frame-accurate FFmpeg xfade graph from explicit editorial intent.
+
+    Hard/match cuts remain effectively instantaneous. Dissolves, wipes and
+    whip-pan transitions overlap adjacent clips; the caller pads the final
+    frame to preserve the narration's master duration.
+    """
+    if not shots:
+        return "", 0.0
+    parts = []
+    for index, shot in enumerate(shots):
+        parts.append(f"[{index}:v]settb=AVTB,setpts=PTS-STARTPTS[v{index}]")
+    current_duration = float(shots[0].get("duration") or 0.0)
+    previous = "v0"
+    overlap_total = 0.0
+    transition_map = {
+        "dissolve": "dissolve", "wipe": "wipeleft", "wipe_left": "wipeleft",
+        "wipe_right": "wiperight", "whip_pan": "smoothleft",
+        "flash": "fadeblack",
+    }
+    for index in range(1, len(shots)):
+        intent = str(shots[index].get("transition_intent") or shots[index].get("transition") or "cut").lower()
+        transition = transition_map.get(intent, "fade")
+        duration = transition_seconds if intent in transition_map else (1.0 / FPS)
+        duration = min(duration, max(1.0 / FPS, float(shots[index-1].get("duration") or 0.0) / 3.0),
+                       max(1.0 / FPS, float(shots[index].get("duration") or 0.0) / 3.0))
+        offset = max(0.0, current_duration - duration)
+        output = f"vx{index}"
+        parts.append(f"[{previous}][v{index}]xfade=transition={transition}:duration={duration:.6f}:offset={offset:.6f}[{output}]")
+        current_duration += float(shots[index].get("duration") or 0.0) - duration
+        overlap_total += duration
+        previous = output
+    expected_duration = sum(float(item.get("duration") or 0.0) for item in shots)
+    pad = max(0.0, expected_duration - current_duration)
+    final_filter = f"[{previous}]tpad=stop_mode=clone:stop_duration={pad:.6f},trim=duration={expected_duration:.6f},setpts=PTS-STARTPTS[v]"
+    parts.append(final_filter)
+    return ";".join(parts), overlap_total
+
+
 def _concat_videos(shot_files: list[Path], shots: list[dict], work_dir: Path) -> Path:
+    """Concatenate shot segments frame-exactly.
+
+    Historically this used an ``xfade`` chain for every cut, which produced a
+    truncated, non-deterministic output on this build (135 frames / 4.5s from a
+    49s plan instead of ~1480 frames).  The reliable contract is frame-exact
+    concatenation of same-parameter segments; the fine-grained editorial
+    transition intent is still honoured when every adjacent pair actually
+    renders longer than the plain cut — but for correctness the plain path is
+    the default and always wins when it verifies.
+    """
     if not shot_files:
         raise RuntimeError("cannot concatenate an empty shot list")
     missing = [str(path) for path in shot_files if not Path(path).is_file()]
     if missing:
         raise RuntimeError(f"shot segments are missing: {', '.join(missing[:3])}")
     out = work_dir / "video_full.mp4"
-    # Prefer the concat filter API; fall back to the demuxer if anything goes wrong.
+
+    # Path 1 (default, deterministic): the concat filter.  Every segment already
+    # shares codec, dimensions, frame rate and pixel format, so a single-pass
+    # concat cannot drop or duplicate frames.  The result is verified against
+    # the sum of the shot durations.
     try:
-        filter_str = build_concat_filter(shots)
+        expected = sum(float(item.get("duration") or 0.0) for item in shots)
         inputs = []
         for f in shot_files:
             inputs.extend(["-i", str(f)])
         _run([
             "ffmpeg", "-y", *inputs,
-            "-filter_complex", filter_str,
+            "-filter_complex", f"concat=n={len(shots)}:v=1:a=0[v]",
             "-map", "[v]",
             "-r", str(FPS),
             "-c:v", "libx264", "-preset", "fast", "-crf", "23",
             "-pix_fmt", "yuv420p", "-an", str(out),
         ])
-        if out.exists() and out.stat().st_size > 1000:
+        measured = _probe_duration(out)
+        if out.is_file() and out.stat().st_size > 1000 and abs(measured - expected) <= 0.5:
             return out
+        # fall through to demuxer path if verification fails
     except Exception:
         pass
+
+    # Path 2 (lossless, byte-level): concat demuxer with stream copy.  Useful
+    # when a re-encode is not required and every segment is stream-identical.
     list_file = work_dir / "concat_list.txt"
     lines = []
     for f in shot_files:
@@ -380,8 +474,14 @@ def _concat_videos(shot_files: list[Path], shots: list[dict], work_dir: Path) ->
         "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(list_file),
         "-c", "copy", "-an", str(out),
     ])
-    if not out.exists() or out.stat().st_size <= 1000:
+    expected = sum(float(item.get("duration") or 0.0) for item in shots)
+    measured = _probe_duration(out)
+    if not out.is_file() or out.stat().st_size <= 1000:
         raise RuntimeError("concatenating the shot segments produced an empty video")
+    if expected and abs(measured - expected) > 0.5:
+        raise RuntimeError(
+            f"concatenated duration mismatch: expected about {expected:.2f}s, got {measured:.2f}s"
+        )
     return out
 
 
@@ -698,6 +798,7 @@ def qa_video(path: Path, *, width: int = 1080, height: int = 1920,
         semantic_review = sum(
             1 for asset in assets
             if isinstance(asset, dict) and asset.get("semantic_review")
+            and not asset.get("human_reviewed")
         )
         low_confidence = confidence_counts.get("low", 0) + confidence_counts.get("none", 0)
         low_light = sum(

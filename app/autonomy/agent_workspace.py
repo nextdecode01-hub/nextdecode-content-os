@@ -10,7 +10,10 @@ from pathlib import Path
 import shutil
 import uuid
 
-from .agent_runtime import agent_runtime_registry
+from .agent_assignment import (
+    AgentAssignmentPlanner, AssignmentRequest, QualificationRecord,
+)
+from .agent_runtime import AgentReadinessEvidence, agent_runtime_registry
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKSPACE_ROOT = ROOT / "outputs" / "autonomy" / "agent-workspaces"
@@ -29,6 +32,38 @@ MAX_FILE_BYTES = 25 * 1024 * 1024
 MAX_RESULT_FILES = 6000
 MAX_RESULT_BYTES = 300 * 1024 * 1024
 MAX_TIMEOUT_SECONDS = 3600
+MAX_ASSIGNMENT_LEDGER = 4096
+
+# Machine-readable resolution requirement for every assignment denial code
+# produced by AgentAssignmentPlanner (presentation lives at this boundary).
+_ASSIGNMENT_REQUIREMENTS = {
+    "agent_unknown": "register the agent in the local readiness inventory",
+    "assignment_planning_not_authorized": "explicit planning authorization for this assignment",
+    "assignment_identity_incomplete": "non-empty assignment ID, task ID and correlation ID",
+    "assignment_objective_or_capability_missing": "a bounded objective and a declared capability",
+    "acceptance_criteria_missing": "at least one explicit acceptance criterion",
+    "timeout_out_of_bounds": "a timeout between 1 and 3600 seconds",
+    "input_references_invalid": "valid input reference strings",
+    "permission_scope_invalid": "valid permission scope strings",
+    "capability_not_declared": "declare the requested capability in the agent's role inventory",
+    "agent_not_installed": "local installation evidence for the requested agent",
+    "agent_configuration_unverified": "non-secret configuration evidence for the agent",
+    "readiness_not_available": "a fresh explicit availability observation",
+    "readiness_qualification_not_verified_for_capability": "capability-specific qualification evidence",
+    "agent_suspended": "explicit evidence that the suspension is lifted",
+    "agent_revoked": "explicit evidence that the agent is reinstated",
+    "readiness_qualification_reference_missing": "a qualification reference in the readiness evidence",
+    "availability_not_confirmed": "explicit availability confirmation",
+    "availability_evidence_stale_or_future": "an availability observation within the freshness and clock-skew bounds",
+    "qualification_record_missing": "a digest-verifiable qualification record",
+    "qualification_subject_or_capability_mismatch": "a qualification record matching the agent and capability",
+    "qualification_not_passed": "a passed qualification run",
+    "qualification_provenance_incomplete": "qualification ID, test suite and evidence reference",
+    "qualification_digest_invalid": "a valid 64-hex qualification evidence digest",
+    "qualification_timestamp_invalid": "a parseable, non-future qualification timestamp",
+    "qualification_expired": "a qualification record that has not expired",
+    "duplicate_assignment": "a new assignment ID for a further assignment",
+}
 
 
 class WorkspaceError(RuntimeError):
@@ -181,11 +216,17 @@ class AgentExecutionAdapter:
 
     def __init__(self, policy: AgentExecutionPolicy | None = None):
         self.policy = policy or AgentExecutionPolicy()
+        self._assignment_ledger: set[str] = set()
 
     def plan(self, *, agent_id: str, workspace_id: str, task: str,
              timeout_seconds: int = 900) -> dict:
-        if not self.policy.invocation_enabled:
-            raise PermissionError("agent invocation is disabled by local execution policy")
+        """Generate a reviewable invocation plan without starting anything.
+
+        Plan generation is deliberately independent of the invocation gate:
+        the default (safe) policy keeps ``invocation_enabled=False`` and this
+        method still produces a plan that records that gate explicitly.
+        Starting a process is refused separately by :meth:`execute`.
+        """
         if self.policy.network_enabled or self.policy.credential_forwarding or self.policy.direct_repository_write:
             raise PermissionError("requested execution policy exceeds the safe local boundary")
         if not isinstance(task, str) or not 1 <= len(task.strip()) <= 8000:
@@ -201,9 +242,13 @@ class AgentExecutionAdapter:
         candidate = candidates.get(agent_id)
         if not candidate or not candidate.get("available"):
             raise WorkspaceError("requested local agent CLI is not installed")
+        manifest_path = WORKSPACE_ROOT / workspace_id / "manifest.json"
+        manifest_bytes = manifest_path.read_bytes()
         return {
             "schema_version": "nextdecode.agent-invocation-plan.v1",
             "plan_id": uuid.uuid4().hex,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "workspace_manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
             "agent_id": agent_id,
             "executable_path": candidate["executable_path"],
             "workspace_id": workspace_id,
@@ -213,10 +258,80 @@ class AgentExecutionAdapter:
             "network_access": False,
             "credential_forwarding": False,
             "direct_repository_write": False,
+            "invocation_authorized": bool(self.policy.invocation_enabled),
+            "invocation_gate": {
+                "invocation_enabled": bool(self.policy.invocation_enabled),
+                "reason": ("invocation_enabled_by_policy" if self.policy.invocation_enabled
+                           else "invocation_disabled_by_policy"),
+            },
             "human_approval_required": True,
             "process_started": False,
             "status": "plan_only",
         }
+
+    def execute(self, plan: dict) -> dict:
+        """Fail-closed execution boundary: refuse every attempt to run a plan.
+
+        Planning is the end of this adapter's authority in this phase. No
+        policy value, plan field or caller argument can start a process here.
+        """
+        if not isinstance(plan, dict) or plan.get("schema_version") != "nextdecode.agent-invocation-plan.v1":
+            raise ValueError("execute requires a valid adapter invocation plan")
+        raise PermissionError("agent process execution is not permitted in this phase")
+
+    def plan_assignment(self, request: AssignmentRequest, *,
+                        readiness_evidence: dict[str, "AgentReadinessEvidence"] | None = None,
+                        qualification: QualificationRecord | None = None,
+                        planning_authorized: bool = False,
+                        now: datetime | None = None) -> dict:
+        """Readiness-aware, plan-only assignment decision through this boundary.
+
+        Delegates to :class:`AgentAssignmentPlanner` (no duplicate readiness
+        logic) and adds idempotent duplicate-assignment detection for accepted
+        assignments. The returned decision never reports an executed
+        assignment: ``process_started`` is always ``False``.
+        """
+        decision = AgentAssignmentPlanner().plan(
+            request, readiness_evidence=readiness_evidence, qualification=qualification,
+            planning_authorized=planning_authorized, now=now,
+        )
+        if "required_missing_evidence" not in decision:
+            decision["required_missing_evidence"] = [
+                {"code": code,
+                 "requirement": _ASSIGNMENT_REQUIREMENTS.get(code, "resolve the denial reason")}
+                for code in decision.get("denial_reason_codes", [])
+            ]
+        if not decision.get("accepted"):
+            return decision
+        assignment_id = getattr(request, "assignment_id", "")
+        if assignment_id in self._assignment_ledger:
+            return {
+                "schema_version": decision["schema_version"],
+                "plan_id": decision["plan_id"],
+                "assignment_id": assignment_id,
+                "task_id": decision.get("task_id"),
+                "agent_id": decision.get("agent_id"),
+                "capability": decision.get("capability"),
+                "correlation_id": decision.get("correlation_id"),
+                "status": "denied",
+                "accepted": False,
+                "denial_reason_codes": ["duplicate_assignment"],
+                "required_missing_evidence": [{
+                    "code": "duplicate_assignment",
+                    "requirement": "issue a new assignment ID for a further assignment",
+                }],
+                "policy_evaluation": decision["policy_evaluation"],
+                "process_started": False,
+                "network_access": False,
+                "credential_forwarding": False,
+                "direct_repository_write": False,
+                "human_approval_required": True,
+                "observed_at": decision["observed_at"],
+            }
+        if len(self._assignment_ledger) >= MAX_ASSIGNMENT_LEDGER:
+            raise WorkspaceError("assignment ledger reached its bounded limit")
+        self._assignment_ledger.add(assignment_id)
+        return decision
 
 
 def collect_workspace_changes(workspace_id: str) -> dict:

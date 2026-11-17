@@ -24,6 +24,7 @@ if str(ROOT) not in sys.path:
 
 from app.script.longform import _visual_query, generate_script
 from app.operations.video_archive import archive_video
+from app.content.formats import resolve_content_format
 load_dotenv(ROOT / ".env", override=True)
 
 PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "").strip()
@@ -568,8 +569,12 @@ def render(background: Path, audio: Path, ass: Path, output: Path):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--topic", default="")
+    parser.add_argument("--content-format", choices=["youtube_longform"], default="youtube_longform")
     args = parser.parse_args()
+    contract = resolve_content_format(args.content_format, producer="long_video")
     data = generate_script(args.topic)
+    data["content_format"] = contract["format_id"]
+    data["content_format_contract"] = contract
     data_dir = ROOT / "data"
     output_dir = ROOT / "outputs"
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -598,7 +603,7 @@ def main():
     render(background, audio, ass, output)
     archived_video = archive_video(output, data_dir / "longform_metadata.json", ROOT, "longform", data["title"])
     print(f"Archived long-form video: {archived_video.resolve()}")
-    print(json.dumps({"status": "success", "format": "youtube_longform", "title": data["title"], "word_count": data["word_count"], "video": str(output)}))
+    print(json.dumps({"status": "success", "format": args.content_format, "title": data["title"], "word_count": data["word_count"], "video": str(output)}))
 
 
 if __name__ == "__main__":

@@ -1,0 +1,303 @@
+{
+  "browser": "Edg/157.0.4341.46",
+  "ranAt": "2026-11-13T12:06:13.398Z",
+  "scenarios": [
+    {
+      "id": "S10",
+      "title": "D37-E legacy data migrates without loss or duplication",
+      "status": "PASS",
+      "detail": "",
+      "evidence": [
+        "IndexedDB upgraded to schema version 2 (saw 2)",
+        "exactly 1 workspace after migration: [\"nextdecode-studio-workspace-main\"]",
+        "legacy workspace record present: nextdecode-studio-workspace-main",
+        "legacy draft still present after migration",
+        "legacy draft tagged to legacy workspace (no orphan)",
+        "legacy draft title + 2 beats preserved",
+        "exactly 1 version (no duplication): 1",
+        "exactly 1 validation-task link (no duplication): 1",
+        "no console errors during migration"
+      ],
+      "ms": 0
+    },
+    {
+      "id": "S1",
+      "title": "Create two workspaces; both remain separate after reload",
+      "status": "PASS",
+      "detail": "",
+      "evidence": [
+        "after reload workspace selector lists: NEXTDECODE Shorts | Alpha Workspace | Beta Workspace",
+        "IndexedDB holds exactly 3 workspaces: Alpha Workspace, Beta Workspace, NEXTDECODE Shorts"
+      ],
+      "ms": 1921
+    },
+    {
+      "id": "S2",
+      "title": "Create multiple Shorts per workspace; lists stay workspace-scoped",
+      "status": "PASS",
+      "detail": "",
+      "evidence": [
+        "Alpha workspace lists its 2 Shorts only: Alpha Short Two | Alpha Short One",
+        "Beta workspace lists only its own Short: Beta Short One",
+        "IndexedDB drafts scoped by workspaceId: Alpha=2 Beta=1 legacy=1"
+      ],
+      "ms": 4380
+    },
+    {
+      "id": "S3",
+      "title": "Edit one Short; autosave persists after reload",
+      "status": "PASS",
+      "detail": "",
+      "evidence": [
+        "after reload the persisted draft still holds the edit: AUTOSAVE-MARKER-ALPHA-1",
+        "scene inspector renders the persisted edit after reload: AUTOSAVE-MARKER-ALPHA-1"
+      ],
+      "ms": 4494
+    },
+    {
+      "id": "S4",
+      "title": "Editing one Short never modifies another Short",
+      "status": "PASS",
+      "detail": "",
+      "evidence": [
+        "Alpha Short One untouched: AUTOSAVE-MARKER-ALPHA-1",
+        "Alpha Short Two has its own edit: ISOLATION-MARKER-B",
+        "Beta Short One has its own edit: ISOLATION-MARKER-C",
+        "legacy migrated Short untouched: Legacy hook",
+        "after reload each Short still holds exactly its own edit"
+      ],
+      "ms": 5489
+    },
+    {
+      "id": "S5",
+      "title": "Save multiple immutable versions; earlier versions remain unchanged",
+      "status": "PASS",
+      "detail": "",
+      "evidence": [
+        "two immutable versions recorded: 89391d62, a11252c3",
+        "versions have distinct SHA-256 digests",
+        "version 1 snapshot preserved the pre-edit title: AUTOSAVE-MARKER-ALPHA-1",
+        "version 2 snapshot holds the new title: AUTOSAVE-MARKER-ALPHA-1 / edited-for-v2",
+        "version 2 parent link: 89391d62",
+        "both versions intact after reload"
+      ],
+      "ms": 3795
+    },
+    {
+      "id": "S6",
+      "title": "SHA-256 digest consistency for every stored version",
+      "status": "PASS",
+      "detail": "",
+      "evidence": [
+        "checked 3 stored versions (incl. migrated legacy version)",
+        "every stored digest matches a fresh SHA-256 of its canonical content"
+      ],
+      "ms": 291
+    },
+    {
+      "id": "S7",
+      "title": "Restoration creates a NEW version; source version unchanged",
+      "status": "PASS",
+      "detail": "",
+      "evidence": [
+        "version count grew by exactly 1: 2 -> 3",
+        "new version records restoreOfVersionId=89391d62",
+        "restoration is a distinct new version",
+        "restored content equals the source version byte-for-byte",
+        "source version row unchanged after restore",
+        "draft now points at the restored version"
+      ],
+      "ms": 2012
+    },
+    {
+      "id": "S8",
+      "title": "Corrupted/altered version cannot be restored (fail closed)",
+      "status": "PASS",
+      "detail": "",
+      "evidence": [
+        "test corrupted version a11252c3 (digest altered in IndexedDB)",
+        "restore blocked with fail-closed error: Version SHA-256 verification failed; restore was blocked",
+        "no new version was created from the corrupted row: count still 3",
+        "test corruption repaired; stored digest restored to the original value"
+      ],
+      "ms": 3231
+    },
+    {
+      "id": "S9",
+      "title": "Validation task linked to an exact version; association persists and is exclusive",
+      "status": "PASS",
+      "detail": "",
+      "evidence": [
+        "UI confirmation: Saved immutable version 83280044-a177-4d16-b21a-74b33de582c1 and linked validation task f529cdf99ac84f18b7750c25181ac12b",
+        "one new task link recorded: [\"f529cdf99a\"]",
+        "linked version exists in the versions store",
+        "draft current version points at the linked version",
+        "after reload the task still binds the exact same version: 83280044",
+        "re-linking the same task to a different version is rejected by the store: blocked:ConstraintError",
+        "version history row renders the exact task association after reload"
+      ],
+      "ms": 4175
+    },
+    {
+      "id": "S11",
+      "title": "Empty states, workspace/Short switching, reload stability",
+      "status": "PASS",
+      "detail": "",
+      "evidence": [
+        "fresh workspace shows an empty Short selector (empty state rendered)",
+        "switching back restores the edited Short in the workbench: AUTOSAVE-MARKER-ALPHA-1",
+        "all workspaces survive reload: NEXTDECODE Shorts | Alpha Workspace | Beta Workspace | Gamma Empty",
+        "IndexedDB holds 4 workspaces at the end: Gamma Empty, Alpha Workspace, Beta Workspace, NEXTDECODE Shorts",
+        "IndexedDB holds 4 Shorts (legacy + 2 Alpha + 1 Beta): Alpha Short One, Alpha Short Two, Beta Short One, AI Accelerates Research?"
+      ],
+      "ms": 2887
+    },
+    {
+      "id": "S12",
+      "title": "Browser console and IndexedDB error sweep",
+      "status": "PASS",
+      "detail": "",
+      "evidence": [
+        "console entries captured: 9 (errors/exceptions: 0)",
+        "network-level failures: http://127.0.0.1:5174/favicon.ico — HTTP 404 ; http://127.0.0.1:5174/favicon.ico — HTTP 404 ; http://127.0.0.1:5174/favicon.ico — HTTP 404 ; http://127.0.0.1:5174/favicon.ico — HTTP 404 ; http://127.0.0.1:5174/favicon.ico — HTTP 404 ; http://127.0.0.1:5174/favicon.ico — HTTP 404 ; http://127.0.0.1:5174/favicon.ico — HTTP 404 ; http://127.0.0.1:5174/favicon.ico — HTTP 404 ; http://127.0.0.1:5174/favicon.ico — HTTP 404",
+        "IndexedDB/storage log issues: 0",
+        "only benign favicon.ico 404s observed (no app resource failures)"
+      ],
+      "ms": 1
+    }
+  ],
+  "dbMeta": [
+    {
+      "step": "legacy-seed",
+      "seeded": "seeded:v1 legacy 1 draft / 1 version / 1 task link",
+      "legacyDigestKnown": true
+    },
+    {
+      "step": "after-first-studio-load",
+      "dbVersion": 2,
+      "stores": [
+        "drafts",
+        "taskLinks",
+        "versions",
+        "workspaces"
+      ]
+    },
+    {
+      "step": "S1-workspaces",
+      "count": 3
+    }
+  ],
+  "consoleIssues": [
+    {
+      "level": "log.network",
+      "text": "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "at": "2026-11-13T12:05:39.850Z"
+    },
+    {
+      "level": "log.network",
+      "text": "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "at": "2026-11-13T12:05:42.120Z"
+    },
+    {
+      "level": "log.network",
+      "text": "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "at": "2026-11-13T12:05:49.770Z"
+    },
+    {
+      "level": "log.network",
+      "text": "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "at": "2026-11-13T12:05:56.396Z"
+    },
+    {
+      "level": "log.network",
+      "text": "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "at": "2026-11-13T12:06:00.207Z"
+    },
+    {
+      "level": "log.network",
+      "text": "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "at": "2026-11-13T12:06:03.417Z"
+    },
+    {
+      "level": "log.network",
+      "text": "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "at": "2026-11-13T12:06:05.665Z"
+    },
+    {
+      "level": "log.network",
+      "text": "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "at": "2026-11-13T12:06:08.435Z"
+    },
+    {
+      "level": "log.network",
+      "text": "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "at": "2026-11-13T12:06:12.828Z"
+    }
+  ],
+  "networkFails": [
+    {
+      "url": "http://127.0.0.1:5174/favicon.ico",
+      "errorText": "HTTP 404",
+      "type": "Other",
+      "at": "2026-11-13T12:05:39.849Z"
+    },
+    {
+      "url": "http://127.0.0.1:5174/favicon.ico",
+      "errorText": "HTTP 404",
+      "type": "Other",
+      "at": "2026-11-13T12:05:42.118Z"
+    },
+    {
+      "url": "http://127.0.0.1:5174/favicon.ico",
+      "errorText": "HTTP 404",
+      "type": "Other",
+      "at": "2026-11-13T12:05:49.770Z"
+    },
+    {
+      "url": "http://127.0.0.1:5174/favicon.ico",
+      "errorText": "HTTP 404",
+      "type": "Other",
+      "at": "2026-11-13T12:05:56.396Z"
+    },
+    {
+      "url": "http://127.0.0.1:5174/favicon.ico",
+      "errorText": "HTTP 404",
+      "type": "Other",
+      "at": "2026-11-13T12:06:00.207Z"
+    },
+    {
+      "url": "http://127.0.0.1:5174/favicon.ico",
+      "errorText": "HTTP 404",
+      "type": "Other",
+      "at": "2026-11-13T12:06:03.417Z"
+    },
+    {
+      "url": "http://127.0.0.1:5174/favicon.ico",
+      "errorText": "HTTP 404",
+      "type": "Other",
+      "at": "2026-11-13T12:06:05.662Z"
+    },
+    {
+      "url": "http://127.0.0.1:5174/favicon.ico",
+      "errorText": "HTTP 404",
+      "type": "Other",
+      "at": "2026-11-13T12:06:08.434Z"
+    },
+    {
+      "url": "http://127.0.0.1:5174/favicon.ico",
+      "errorText": "HTTP 404",
+      "type": "Other",
+      "at": "2026-11-13T12:06:12.828Z"
+    }
+  ],
+  "idbIssues": [],
+  "extraFinding": {
+    "emptyShortOptions": 0,
+    "workbenchBeatsWhileEmpty": 5,
+    "inspectorStillShowing": "AUTOSAVE-MARKER-ALPHA-1"
+  },
+  "tally": {
+    "pass": 12,
+    "fail": 0
+  }
+}

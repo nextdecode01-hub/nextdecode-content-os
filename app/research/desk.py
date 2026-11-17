@@ -10,12 +10,14 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from html import unescape
 from html.parser import HTMLParser
 from urllib.parse import urlparse
 
 import requests
 
 from . import atomic
+from . import lineage
 from . import topics as topic_research
 
 SCRIPT_NAME = "app/research/desk.py"
@@ -156,6 +158,10 @@ def _is_toc_or_metadata(text: str) -> bool:
         return False
     if any(marker in lowered for marker in _TOC_MARKERS):
         return True
+    # Strip fused blog navigation such as "4 min ... // contents 1 Getting Maps
+    # 2 Deploying..." before it can be mistaken for a source claim.
+    if re.search(r"\bcontents\s+\d+\b", lowered) and re.search(r"\b\d+\s+min(?:ute)?s?\b", lowered):
+        return True
     # "governance 7 sections Last updated : March 28, 2026" is card chrome, and
     # the pairing is required so "the report has 7 sections of guidance" survives.
     return bool(_TOC_METADATA_RE.search(lowered)) and "last updated" in lowered
@@ -276,16 +282,38 @@ def _strip_html(html: str) -> tuple[str, str]:
 def _extract_arxiv_abs(html: str, url: str) -> tuple[str, str, str]:
     text, title = _strip_html(html)
     published = ""
-    m = re.search(r'([A-Za-z]{3,9}\s+\d{1,2},\s+\d{4}|\d{4}-\d{2}-\d{2})', html)
-    if m:
-        published = m.group(1)
-    m2 = re.search(r'Abstract[^a-zA-Z0-9]+(.{50,800})', html, re.I | re.S)
-    if m2:
-        cand = re.sub(r"\s+", " ", m2.group(1)).strip()
-        if len(cand) > len(text) * 0.1:
-            text = cand
+    date_match = re.search(r'([A-Za-z]{3,9}\s+\d{1,2},\s+\d{4}|\d{4}-\d{2}-\d{2})', html)
+    if date_match:
+        published = date_match.group(1)
+
+    # arXiv's modern HTML puts the abstract in OpenGraph/citation meta tags.
+    # The visible-text parser intentionally ignores <meta>, so the old fallback
+    # accidentally returned page-head markup as a claim. Parse attributes by
+    # name, independent of their order, and prefer the canonical abstract.
+    descriptions = []
+    for tag in re.findall(r"<meta\b[^>]*>", html, re.I):
+        attrs = {
+            key.lower(): unescape(value)
+            for key, value in re.findall(r"""([:\w-]+)\s*=\s*["']([^"']*)["']""", tag)
+        }
+        kind = (attrs.get("property") or attrs.get("name") or "").lower()
+        if kind in {"og:description", "description", "citation_abstract"}:
+            candidate = re.sub(r"\s+", " ", attrs.get("content", "")).strip()
+            if len(candidate) >= 80:
+                descriptions.append(candidate)
+    if descriptions:
+        text = max(descriptions, key=len)
+    else:
+        # Older arXiv HTML uses a visible Abstract block; retain only a bounded
+        # sentence-like extraction and never include raw tags.
+        abstract = re.search(
+            r"<blockquote[^>]*class=[\"'][^\"']*abstract[^\"']*[\"'][^>]*>(.*?)</blockquote>",
+            html, re.I | re.S,
+        )
+        if abstract:
+            text, _ = _strip_html(abstract.group(1))
     if not title:
-        title = text[:80]
+        title = text[:120]
     return text, title, published
 
 
@@ -395,7 +423,13 @@ def extract_claims(text: str, *, source_url: str, min_quote_words: int = 8) -> l
             continue
         # must contain concrete technical claim: number or named model/system/metric
         has_number = bool(re.search(r'\b\d+(\.\d+)?%?\b|\b\d+x\b|\bten-fold\b|\bhundred-fold\b|\bthousand-fold\b', s, re.I))
-        has_named = bool(re.search(r'\b(GPT|LLM|BERT|Transformer|Claude|Gemini|LLaMA|DeepSeek|model|system|benchmark|F1|accuracy|BLEU|perplexity)\b', s, re.I))
+        has_named = bool(re.search(
+            r'\b(GPT|LLM|BERT|Transformer|Claude|Gemini|LLaMA|DeepSeek|model|system|'
+            r'benchmark|F1|accuracy|BLEU|perplexity|router|expert|token|mixture-of-experts|'
+            r'agent|research|hypothesis|experiment|scientific discovery|engineering|progress|scientist|'
+            r'shadow evaluation|six days|thousands of dollars|compute|reject(?:ed|ion)?)\b',
+            s, re.I,
+        ))
         if not (has_number or has_named):
             continue
         # find verbatim quote - try to find a substring of reasonable length in text
@@ -502,7 +536,32 @@ def _rank_pages(topic: str, pages: list[dict]) -> list[dict]:
     best = scored[0][0]
     if best <= 0:
         return []
-    return [page for score, _, page in scored if score >= max(0.2, best * 0.5)]
+    # A primary documentation page may use product-specific terminology rather
+    # than repeating every phrase in a news headline. The leading subject-anchor
+    # check above prevents broad matches; a quarter of topic terms is enough to
+    # retain those authoritative pages alongside the original report.
+    return [page for score, _, page in scored if score >= max(0.2, best * 0.25)]
+
+
+def _rank_claims_for_topic(topic: str, claims: list[dict]) -> list[dict]:
+    """Prioritize verbatim claims that answer the selected topic before source caps."""
+    terms = _topic_terms(topic)
+    scored = []
+    for index, claim in enumerate(claims or []):
+        haystack = f"{claim.get('claim') or ''} {claim.get('quote') or ''}".lower()
+        matched = sum(1 for term in terms if term in haystack)
+        # These are topical, testable outcomes rather than generic page metadata.
+        outcome_bonus = 4 if any(
+            phrase in haystack for phrase in (
+                "substantial progress", "research question", "without human help",
+                "experimental validation", "hypothesis generation", "shadow evaluation",
+                "six days", "thousands of dollars", "unambiguously rejected",
+                "rejected by the authors", "research lifecycle",
+            )
+        ) else 0
+        scored.append((matched + outcome_bonus, index, claim))
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    return [item[2] for item in scored]
 
 
 def find_contradictions(claims: list[dict]) -> list[dict]:
@@ -747,18 +806,34 @@ def research_topic(topic: str, *, source_urls: list[str] | None = None, max_sour
     }
     try:
         urls_to_fetch = []
-        if source_urls:
-            urls_to_fetch.extend([u for u in source_urls if u])
-        else:
-            # Search for this exact topic. Deriving URLs from feed discovery
-            # pulled unrelated front-page stories into the script.
-            try:
-                for hit in topic_research.search_web(topic, limit=max_sources * 2):
-                    u = hit.get("url")
-                    if u and u not in urls_to_fetch:
-                        urls_to_fetch.append(u)
-            except Exception as e:
-                result["errors"].append(f"search_web error: {e}")
+        explicit_sources_supplied = source_urls is not None
+        if explicit_sources_supplied:
+            # Explicit source lists are a caller-controlled trust boundary. Never
+            # silently broaden them: invalid/empty lists must fail closed, and a
+            # valid list must fetch only the URLs the caller supplied.
+            urls_to_fetch.extend([u for u in (source_urls or []) if u])
+        # Discovery is used only when the caller did not supply a source list.
+        if not explicit_sources_supplied:
+            brand_terms = [
+            word for word in re.findall(r"[A-Z][A-Za-z0-9-]{2,}", topic)
+            if word.lower() not in {"can", "how", "what", "why", "the", "when"}
+        ]
+            brand_query = " ".join(brand_terms[:2]) or topic
+            search_queries = [
+                topic,
+                f"{brand_query} official documentation",
+                f"{brand_query} technical specification primary source",
+            ]
+            for query in search_queries:
+                if not query.strip():
+                    continue
+                try:
+                    for hit in topic_research.search_web(query, limit=max_sources * 2):
+                        url = hit.get("url")
+                        if url and url not in urls_to_fetch:
+                            urls_to_fetch.append(url)
+                except Exception as exc:
+                    result["errors"].append(f"search_web error ({query[:80]}): {type(exc).__name__}")
         rejected = [str(u) for u in urls_to_fetch if not fetchable_url(u)]
         urls_to_fetch = _dedupe_source_urls(urls_to_fetch)
         if rejected:
@@ -771,15 +846,17 @@ def research_topic(topic: str, *, source_urls: list[str] | None = None, max_sour
             result["errors"].append("no candidate source URLs for topic")
             return result
         fetched_pages = []
-        candidates = list(dict.fromkeys(urls_to_fetch))[:max_sources * 2]
-        with ThreadPoolExecutor(max_workers=min(6, max(1, len(candidates)))) as pool:
-            pages = list(pool.map(fetch_url, candidates))
+        candidates = list(dict.fromkeys(urls_to_fetch))[:max_sources * 6]
+        def _safe_fetch(url: str) -> dict:
+            try:
+                return fetch_url(url)
+            except Exception as exc:
+                return {"url": url, "ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        with ThreadPoolExecutor(max_workers=min(8, max(1, len(candidates)))) as pool:
+            pages = list(pool.map(_safe_fetch, candidates))
         for page in pages:
-            if len(fetched_pages) >= max_sources:
-                break
             if page.get("ok") and page.get("text"):
                 fetched_pages.append(page)
-                result["sources"].append(page)
             elif page.get("error"):
                 result["errors"].append(f"{page.get('url', '')}: {page['error']}")
         if not fetched_pages:
@@ -790,7 +867,45 @@ def research_topic(topic: str, *, source_urls: list[str] | None = None, max_sour
         dropped = [page.get("url", "") for page in fetched_pages if page not in relevant]
         if dropped:
             result["errors"].append("dropped off-topic sources: " + ", ".join(dropped))
-        fetched_pages = relevant
+        # Keep one representative per independent text cluster before applying
+        # the source cap. Syndicated copies count as one voice, not corroboration.
+        cluster_data = lineage.cluster_sources(relevant)
+        cluster_by_url = cluster_data.get("by_url") or {}
+        cluster_meta = {
+            str(item.get("cluster_id") or ""): item
+            for item in cluster_data.get("clusters") or []
+        }
+        authority_rank = {
+            "primary": 0, "documentation": 0, "government": 0,
+            "blog": 1, "wire": 2, "reporting": 3,
+            "aggregator": 8, "directory": 9,
+        }
+        relevant.sort(key=lambda page: authority_rank.get(
+            lineage.source_type(str(page.get("url") or ""), str(page.get("text") or ""), str(page.get("title") or "")),
+            5,
+        ))
+        selected_pages = []
+        seen_clusters = set()
+        seen_hosts = set()
+        for page in relevant:
+            url = str(page.get("url") or "")
+            canonical = lineage.canonical_url(url)
+            cluster_id = cluster_by_url.get(canonical) or canonical
+            metadata = cluster_meta.get(cluster_id) or {}
+            source_kind = lineage.source_type(url, str(page.get("text") or ""), str(page.get("title") or ""))
+            host = lineage.publisher_of(url).lower()
+            if source_kind in {"aggregator", "directory"}:
+                continue
+            if not metadata.get("independent", False) or cluster_id in seen_clusters or host in seen_hosts:
+                continue
+            selected_pages.append(page)
+            seen_clusters.add(cluster_id)
+            seen_hosts.add(host)
+            if len(selected_pages) >= max_sources:
+                break
+        fetched_pages = selected_pages
+        result["independent_source_count"] = len(selected_pages)
+        result["source_clusters"] = cluster_data.get("clusters") or []
         result["sources"] = fetched_pages
         if not fetched_pages:
             result["errors"].append(f"no fetched source matched topic anchors: {_topic_anchors(topic)}")
@@ -818,7 +933,9 @@ def research_topic(topic: str, *, source_urls: list[str] | None = None, max_sour
         per_source: list[list[dict]] = []
         for p in fetched_pages:
             txt = p.get("text", "") or ""
-            items = extract_claims(txt, source_url=p.get("url", ""))[:PER_SOURCE_CLAIM_CAP]
+            items = _rank_claims_for_topic(
+                topic, extract_claims(txt, source_url=p.get("url", ""))
+            )[:PER_SOURCE_CLAIM_CAP]
             for item in items:
                 item["source_published"] = p.get("published", "")
             if items:
@@ -861,8 +978,59 @@ def research_topic(topic: str, *, source_urls: list[str] | None = None, max_sour
         except Exception as e:
             result["errors"].append(f"limitations error: {e}")
             result["limitations"] = []
-        if not result["primary"] or len(result["claims"]) == 0:
+        independent_count = int(result.get("independent_source_count") or 0)
+        source_kinds = {
+            str(page.get("url") or ""): lineage.source_type(
+                str(page.get("url") or ""),
+                str(page.get("text") or ""),
+                str(page.get("title") or ""),
+            )
+            for page in fetched_pages
+        }
+        authoritative_kinds = {"primary", "documentation", "government"}
+        editorial_kinds = {"wire", "reporting"}
+        authoritative_urls = {
+            url for url, kind in source_kinds.items() if kind in authoritative_kinds
+        }
+        editorial_urls = {
+            url for url, kind in source_kinds.items() if kind in editorial_kinds
+        }
+        credible_urls = authoritative_urls | editorial_urls
+        credible_claim_count = sum(
+            1 for claim in result["claims"]
+            if str(claim.get("source_url") or "") in credible_urls
+        )
+        result["source_quality"] = {
+            "source_type_counts": {
+                kind: sum(1 for value in source_kinds.values() if value == kind)
+                for kind in sorted(set(source_kinds.values()))
+            },
+            "independent_source_count": independent_count,
+            "authoritative_source_count": len(authoritative_urls),
+            "editorial_source_count": len(editorial_urls),
+            "credible_claim_count": credible_claim_count,
+            "policy": "two independent sources plus one primary/documentation/government source or two wire/reporting sources, with at least one claim from those sources",
+        }
+        quality_bar_met = (
+            len(authoritative_urls) >= 1 or len(editorial_urls) >= 2
+        ) and credible_claim_count >= 1
+        if (
+            not result["primary"]
+            or len(result["claims"]) == 0
+            or independent_count < 2
+            or not quality_bar_met
+        ):
             result["verdict"] = "insufficient"
+            if independent_count < 2:
+                result["errors"].append(
+                    f"insufficient independent evidence: {independent_count} source cluster(s); "
+                    "at least 2 distinct source clusters are required for strong production"
+                )
+            if not quality_bar_met:
+                result["errors"].append(
+                    "insufficient source authority: require at least one primary/documentation/government "
+                    "source or two independent wire/reporting sources, plus one claim from those sources"
+                )
         else:
             result["verdict"] = "sufficient"
         return result

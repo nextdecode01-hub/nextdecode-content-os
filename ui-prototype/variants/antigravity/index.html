@@ -1,0 +1,1491 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#090C10">
+<title>NEXTDECODE — Creative Content OS & Studio</title>
+<style>
+/* ==========================================================================
+   NEXTDECODE PRO STUDIO DESIGN SYSTEM (Next-Gen Creator Studio & Flow Tier)
+   Aesthetic: Midnight Obsidian, Neon Violet/Cyan/Emerald Accents, Glassmorphic
+   ========================================================================== */
+:root {
+  color-scheme: dark;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Inter", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+
+  /* Obsidian Studio Canvas */
+  --bg-canvas: #07090E;
+  --bg-sidebar: #0B0E17;
+  --bg-surface: #101522;
+  --bg-surface-elevated: #161D2E;
+  --bg-surface-active: #1F293F;
+  --bg-glass: rgba(16, 21, 34, 0.82);
+  --bg-input: #0D121D;
+
+  --border-subtle: rgba(255, 255, 255, 0.07);
+  --border-medium: rgba(255, 255, 255, 0.13);
+  --border-highlight: rgba(99, 102, 241, 0.45);
+
+  --text-primary: #F8FAFC;
+  --text-secondary: #94A3B8;
+  --text-muted: #64748B;
+
+  /* Signature Studio Gradients & Glows */
+  --accent-purple: #8B5CF6;
+  --accent-indigo: #6366F1;
+  --accent-cyan: #06B6D4;
+  --accent-emerald: #10B981;
+  --accent-amber: #F59E0B;
+  --accent-rose: #F43F5E;
+
+  --gradient-brand: linear-gradient(135deg, #6366F1 0%, #A855F7 50%, #EC4899 100%);
+  --gradient-cyan: linear-gradient(135deg, #06B6D4 0%, #3B82F6 100%);
+  --gradient-emerald: linear-gradient(135deg, #10B981 0%, #06B6D4 100%);
+  --gradient-card: linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0) 100%);
+
+  --shadow-sm: 0 2px 6px rgba(0,0,0,0.5);
+  --shadow-md: 0 8px 24px rgba(0,0,0,0.6);
+  --shadow-glow-purple: 0 0 24px rgba(139, 92, 246, 0.35);
+  --shadow-glow-emerald: 0 0 24px rgba(16, 185, 129, 0.3);
+
+  --radius-xs: 4px;
+  --radius-sm: 7px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-full: 9999px;
+
+  --sidebar-w: 230px;
+  --topbar-h: 56px;
+}
+
+html[data-theme="light"] {
+  color-scheme: light;
+  --bg-canvas: #F1F4F9;
+  --bg-sidebar: #FFFFFF;
+  --bg-surface: #FFFFFF;
+  --bg-surface-elevated: #F8FAFC;
+  --bg-surface-active: #E2E8F0;
+  --bg-glass: rgba(255, 255, 255, 0.88);
+  --bg-input: #F1F5F9;
+
+  --border-subtle: #E2E8F0;
+  --border-medium: #CBD5E1;
+  --border-highlight: rgba(99, 102, 241, 0.5);
+
+  --text-primary: #0F172A;
+  --text-secondary: #475569;
+  --text-muted: #64748B;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: var(--font-sans);
+  background: var(--bg-canvas);
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; border: none; background: none; }
+button:focus-visible, a:focus-visible { outline: 2px solid var(--accent-indigo); outline-offset: 2px; }
+
+/* Studio Master Shell */
+.studio-shell {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+}
+
+/* Left Global App Nav Rail */
+.studio-rail {
+  width: var(--sidebar-w);
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  z-index: 50;
+}
+.rail-header {
+  padding: 16px 18px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.logo-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  background: var(--gradient-brand);
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-weight: 900;
+  font-size: 14px;
+  box-shadow: 0 0 16px rgba(139, 92, 246, 0.5);
+  letter-spacing: -0.5px;
+}
+.logo-title {
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.4px;
+  background: linear-gradient(180deg, #fff 0%, #CBD5E1 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.new-project-btn {
+  margin: 14px 14px 8px;
+  padding: 10px 14px;
+  background: var(--gradient-brand);
+  border-radius: var(--radius-sm);
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  box-shadow: var(--shadow-glow-purple);
+  transition: transform 0.15s, filter 0.15s;
+}
+.new-project-btn:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.1);
+}
+
+.rail-nav {
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  overflow-y: auto;
+  flex: 1;
+}
+.rail-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  font-weight: 500;
+  transition: all 0.15s;
+  width: 100%;
+}
+.rail-link:hover {
+  background: var(--bg-surface-elevated);
+  color: var(--text-primary);
+}
+.rail-link.active {
+  background: rgba(99, 102, 241, 0.15);
+  color: #A5B4FC;
+  font-weight: 600;
+  border-left: 3px solid var(--accent-indigo);
+}
+.rail-link .badge-count {
+  margin-left: auto;
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  font-size: 10px;
+  background: var(--bg-surface-active);
+  color: var(--text-muted);
+}
+.rail-link.active .badge-count {
+  background: var(--accent-indigo);
+  color: #fff;
+}
+
+.rail-footer {
+  padding: 14px 16px;
+  border-top: 1px solid var(--border-subtle);
+  background: rgba(0,0,0,0.15);
+}
+.operator-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.avatar-circle {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #10B981, #06B6D4);
+  color: #07090E;
+  font-weight: 800;
+  font-size: 11px;
+  display: grid;
+  place-items: center;
+}
+
+/* Studio Main Stage */
+.studio-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* Studio Top Bar */
+.studio-topbar {
+  height: var(--topbar-h);
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 18px;
+  flex-shrink: 0;
+}
+.topbar-breadcrumbs {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.project-selector {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text-primary);
+  background: var(--bg-surface-elevated);
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+}
+.status-pill-draft {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--accent-amber);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+/* Center Navigation Mode Tabs */
+.view-mode-tabs {
+  display: flex;
+  align-items: center;
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 3px;
+  gap: 3px;
+}
+.mode-tab {
+  padding: 5px 12px;
+  border-radius: var(--radius-xs);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  transition: all 0.15s;
+}
+.mode-tab:hover { color: var(--text-primary); }
+.mode-tab.active {
+  background: var(--bg-surface-elevated);
+  color: var(--text-primary);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+  border: 1px solid var(--border-subtle);
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.btn-render-glow {
+  padding: 7px 16px;
+  background: linear-gradient(135deg, #06B6D4 0%, #3B82F6 100%);
+  border-radius: var(--radius-sm);
+  color: #fff;
+  font-weight: 700;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 0 16px rgba(6, 182, 212, 0.4);
+  transition: filter 0.15s;
+}
+.btn-render-glow:hover { filter: brightness(1.15); }
+
+/* Workspace Scroll Area */
+.workspace-scroll-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+/* Three-Column Studio Workstation */
+.studio-workstation {
+  display: grid;
+  grid-template-columns: 290px minmax(0, 1fr) 310px;
+  gap: 12px;
+  padding: 12px 16px;
+  flex-shrink: 0;
+}
+
+/* LEFT COLUMN: Scenes List */
+.panel-scenes {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 520px;
+  overflow-y: auto;
+}
+.panel-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 2px;
+}
+.panel-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-muted);
+}
+.scene-card-item {
+  display: flex;
+  gap: 10px;
+  padding: 8px;
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.scene-card-item:hover, .scene-card-item.active {
+  border-color: var(--accent-indigo);
+  background: var(--bg-surface-active);
+  box-shadow: 0 0 12px rgba(99, 102, 241, 0.18);
+}
+.scene-thumb-preview {
+  width: 64px;
+  height: 64px;
+  border-radius: var(--radius-xs);
+  background: linear-gradient(135deg, #1E1B4B, #0F172A);
+  overflow: hidden;
+  position: relative;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255,255,255,0.08);
+}
+.scene-thumb-tag {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  background: rgba(0,0,0,0.75);
+  font-size: 8px;
+  font-weight: 800;
+  padding: 1px 4px;
+  border-radius: 2px;
+}
+.scene-card-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.scene-name-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.scene-name {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.scene-timecode {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+.scene-desc {
+  font-size: 10.5px;
+  color: var(--text-secondary);
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* CENTER COLUMN: Hero Player & In-Line Node Pipeline */
+.panel-viewport {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.hero-player-box {
+  background: #000;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-medium);
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--shadow-md);
+}
+.player-screen {
+  width: 100%;
+  aspect-ratio: 16/9;
+  background: radial-gradient(circle at center, #1E1B4B 0%, #030712 100%);
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.player-screen.vertical-mode {
+  aspect-ratio: 9/16;
+  max-height: 440px;
+  margin: 0 auto;
+}
+.aurora-bg-mesh {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at top, rgba(99, 102, 241, 0.4) 0%, rgba(6, 182, 212, 0.25) 45%, transparent 70%);
+  mix-blend-mode: screen;
+}
+.player-watermark {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  display: flex;
+  gap: 8px;
+}
+.watermark-badge {
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(8px);
+  padding: 3px 8px;
+  border-radius: var(--radius-xs);
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+.player-center-graphic {
+  position: relative;
+  z-index: 2;
+  text-align: center;
+  padding: 20px;
+}
+.screen-subtitle-overlay {
+  position: absolute;
+  bottom: 24px;
+  left: 20px;
+  right: 20px;
+  background: rgba(0, 0, 0, 0.78);
+  backdrop-filter: blur(10px);
+  padding: 10px 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.player-controls {
+  padding: 10px 14px;
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.player-scrubber-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+.scrubber-track {
+  flex: 1;
+  height: 5px;
+  background: var(--bg-surface-active);
+  border-radius: var(--radius-full);
+  position: relative;
+  cursor: pointer;
+}
+.scrubber-fill {
+  width: 44%;
+  height: 100%;
+  background: linear-gradient(90deg, #6366F1, #06B6D4);
+  border-radius: var(--radius-full);
+  position: relative;
+}
+.scrubber-head {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  position: absolute;
+  right: -6px;
+  top: -3.5px;
+  box-shadow: 0 0 6px rgba(0,0,0,0.8);
+}
+
+/* Micro Pipeline Stage Nodes below Video (Image 1 Style) */
+.flow-nodes-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+  position: relative;
+}
+.flow-node-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 6px 12px;
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.flow-node-item:hover, .flow-node-item.active {
+  border-color: var(--accent-indigo);
+  background: rgba(99, 102, 241, 0.15);
+}
+.node-title {
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.node-sub {
+  font-size: 9.5px;
+  color: var(--text-muted);
+}
+.flow-arrow-connector {
+  color: var(--border-highlight);
+  font-size: 14px;
+}
+
+/* RIGHT COLUMN: Render Queue & Generation Settings */
+.panel-sidebar-right {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.studio-box {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 14px;
+}
+.box-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.queue-card {
+  padding: 10px;
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  margin-bottom: 8px;
+}
+.queue-title {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+.queue-meta {
+  font-size: 10px;
+  color: var(--text-muted);
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.queue-progress-bar {
+  height: 4px;
+  background: var(--bg-canvas);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+}
+.queue-progress-fill {
+  width: 68%;
+  height: 100%;
+  background: linear-gradient(90deg, #10B981, #06B6D4);
+}
+
+.settings-grid-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11.5px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.settings-grid-row:last-child { border-bottom: none; }
+.settings-label { color: var(--text-muted); }
+.settings-val { font-weight: 600; color: var(--text-primary); }
+
+.ai-director-prompt {
+  background: rgba(99, 102, 241, 0.08);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-size: 11.5px;
+}
+.ai-director-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  color: #A5B4FC;
+  margin-bottom: 4px;
+}
+
+/* BOTTOM MULTI-TRACK TIMELINE (Like Google Flow image!) */
+.timeline-deck {
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  padding: 10px 16px;
+  flex-shrink: 0;
+}
+.timeline-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.timeline-tools-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tool-btn {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-xs);
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.tool-btn.active, .tool-btn:hover {
+  background: var(--accent-indigo);
+  color: #fff;
+}
+
+.timeline-canvas-container {
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  position: relative;
+  overflow-x: auto;
+}
+.timeline-time-ruler {
+  height: 18px;
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 2px;
+}
+.timeline-track-row {
+  display: flex;
+  align-items: center;
+  height: 34px;
+  gap: 8px;
+  position: relative;
+}
+.track-label {
+  width: 75px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.track-blocks-container {
+  flex: 1;
+  display: flex;
+  gap: 4px;
+  height: 100%;
+}
+.track-clip-block {
+  border-radius: var(--radius-xs);
+  padding: 0 8px;
+  display: flex;
+  align-items: center;
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border: 1px solid rgba(255,255,255,0.1);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+  cursor: pointer;
+}
+.clip-video {
+  background: linear-gradient(90deg, #1E3A8A, #2563EB);
+  color: #DBEAFE;
+}
+.clip-prompt {
+  background: linear-gradient(90deg, #581C87, #7E22CE);
+  color: #F3E8FF;
+}
+.clip-audio {
+  background: linear-gradient(90deg, #064E3B, #059669);
+  color: #D1FAE5;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.soundwave-canvas {
+  flex: 1;
+  height: 20px;
+}
+
+/* Playhead Needle */
+.timeline-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 44%;
+  width: 2px;
+  background: #06B6D4;
+  z-index: 10;
+  pointer-events: none;
+}
+.timeline-playhead::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -4px;
+  width: 10px;
+  height: 10px;
+  background: #06B6D4;
+  border-radius: 2px;
+  transform: rotate(45deg);
+}
+
+/* SECTION 2: END-TO-END WORKFLOW PIPELINE (Creator Studio Bottom Section) */
+.pipeline-showcase-section {
+  padding: 24px 16px;
+  background: var(--bg-canvas);
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.pipeline-header-box {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.pipeline-eyebrow {
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--accent-purple);
+}
+.pipeline-title {
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+}
+.pipeline-cards-row {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+.pipeline-step-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: transform 0.15s, border-color 0.15s;
+}
+.pipeline-step-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent-indigo);
+  box-shadow: var(--shadow-md);
+}
+.step-number-tag {
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--accent-cyan);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+.step-card-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.step-card-body {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+.step-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+/* Modals & Toasts */
+.toast-bar {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-medium);
+  box-shadow: var(--shadow-md);
+  padding: 12px 18px;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  opacity: 0;
+  transform: translateY(12px);
+  transition: all 0.2s;
+  pointer-events: none;
+  z-index: 100;
+}
+.toast-bar.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+</style>
+</head>
+<body>
+
+<div class="studio-shell">
+  <!-- LEFT GLOBAL APP NAV RAIL -->
+  <aside class="studio-rail">
+    <div class="rail-header">
+      <div class="logo-icon">ND</div>
+      <div>
+        <div class="logo-title">NEXTDECODE</div>
+        <div style="font-size:9.5px;color:var(--text-muted);font-weight:600;letter-spacing:0.5px;">CREATIVE CONTENT OS</div>
+      </div>
+    </div>
+
+    <button class="new-project-btn" onclick="triggerAction('New Production Enqueued')">
+      <span>+</span>
+      <span>New Project</span>
+    </button>
+
+    <nav class="rail-nav">
+      <button class="rail-link active" onclick="switchNav('Studio')">
+        <span>🎬</span>
+        <span>Studio Flow</span>
+      </button>
+      <button class="rail-link" onclick="switchNav('Overview')">
+        <span>◈</span>
+        <span>Overview</span>
+      </button>
+      <button class="rail-link" onclick="switchNav('Projects')">
+        <span>▤</span>
+        <span>Projects</span>
+        <span class="badge-count">8</span>
+      </button>
+      <button class="rail-link" onclick="switchNav('Workflows')">
+        <span>⚡</span>
+        <span>Workflows (DAG)</span>
+      </button>
+      <button class="rail-link" onclick="switchNav('Research')">
+        <span>🔬</span>
+        <span>Research & Claims</span>
+      </button>
+      <button class="rail-link" onclick="switchNav('Review & Approvals')">
+        <span>✓</span>
+        <span>Review & Gate</span>
+        <span class="badge-count" style="background:var(--accent-amber);color:#07090E;font-weight:800;">2</span>
+      </button>
+      <button class="rail-link" onclick="switchNav('Publishing')">
+        <span>↗</span>
+        <span>Distribution</span>
+      </button>
+      <button class="rail-link" onclick="switchNav('Analytics')">
+        <span>📊</span>
+        <span>Analytics</span>
+      </button>
+      <button class="rail-link" onclick="switchNav('Operations')">
+        <span>⚙</span>
+        <span>Operations</span>
+      </button>
+      <button class="rail-link" onclick="switchNav('Settings')">
+        <span>⌥</span>
+        <span>Settings</span>
+      </button>
+    </nav>
+
+    <div class="rail-footer">
+      <div class="operator-row">
+        <div class="avatar-circle">AN</div>
+        <div style="display:flex;flex-direction:column;">
+          <strong style="font-size:11.5px;color:var(--text-primary);">Anish (Owner)</strong>
+          <span style="font-size:9.5px;color:var(--accent-emerald);font-weight:600;">● Local Engine Active</span>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- STUDIO MAIN STAGE -->
+  <main class="studio-main">
+    <!-- TOPBAR -->
+    <header class="studio-topbar">
+      <div class="topbar-breadcrumbs">
+        <div class="project-selector">
+          <span>AI Accelerates Research?</span>
+          <span style="color:var(--text-muted);font-size:11px;">▾</span>
+        </div>
+        <span class="status-pill-draft">Draft · Standard 35s</span>
+      </div>
+
+      <!-- CENTER VIEW SWITCHER -->
+      <div class="view-mode-tabs">
+        <button class="mode-tab active" onclick="switchMode('Timeline')">🎬 Studio Timeline</button>
+        <button class="mode-tab" onclick="switchMode('Pipeline')">⚡ End-to-End Flow</button>
+        <button class="mode-tab" onclick="switchMode('Sceneboard')">▦ Sceneboard</button>
+        <button class="mode-tab" onclick="switchMode('Review')">✓ Human Approval</button>
+      </div>
+
+      <div class="topbar-actions">
+        <button class="tool-btn" id="aspect-toggle-btn" title="Toggle 9:16 Vertical / 16:9 Landscape" onclick="toggleAspectRatio()">⤢</button>
+        <button class="tool-btn" title="Toggle Theme" onclick="toggleTheme()">☼</button>
+        <button class="btn-render-glow" onclick="triggerAction('FFmpeg Rendering Started')">
+          <span>⚡</span>
+          <span>Render 1080p</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- WORKSPACE SCROLL AREA -->
+    <div class="workspace-scroll-area">
+      <!-- WORKSTATION: THREE COLUMNS -->
+      <section class="studio-workstation">
+        <!-- LEFT: SCENES LIST -->
+        <div class="panel-scenes">
+          <div class="panel-header-row">
+            <span class="panel-title">Scene Beats</span>
+            <button style="font-size:11px;color:var(--accent-indigo);font-weight:700;">+ Add Beat</button>
+          </div>
+
+          <div class="scene-card-item active" onclick="selectScene(1, '00:00 - 00:04.5', 'Hook: Does AI speed up research or just noise?')">
+            <div class="scene-thumb-preview">
+              <span class="scene-thumb-tag">01</span>
+              <span>⚡</span>
+            </div>
+            <div class="scene-card-meta">
+              <div class="scene-name-row">
+                <span class="scene-name">Establishing Hook</span>
+                <span class="scene-timecode">0:00 - 0:04</span>
+              </div>
+              <div class="scene-desc">Kinetic typography card: "Does AI speed up research, or is it faster noise?"</div>
+            </div>
+          </div>
+
+          <div class="scene-card-item" onclick="selectScene(2, '00:04.5 - 00:11.5', 'Evidence: Hypotheses discovery acceleration')">
+            <div class="scene-thumb-preview" style="background:linear-gradient(135deg, #064E3B, #022C22);">
+              <span class="scene-thumb-tag">02</span>
+              <span>🔬</span>
+            </div>
+            <div class="scene-card-meta">
+              <div class="scene-name-row">
+                <span class="scene-name">Evidence Reveal</span>
+                <span class="scene-timecode">0:04 - 0:11</span>
+              </div>
+              <div class="scene-desc">B-roll: Machine learning lab data center servers with citation badge.</div>
+            </div>
+          </div>
+
+          <div class="scene-card-item" onclick="selectScene(3, '00:11.5 - 00:20.0', 'Mechanism: Reducing wasted experiment cycles')">
+            <div class="scene-thumb-preview" style="background:linear-gradient(135deg, #312E81, #1E1B4B);">
+              <span class="scene-thumb-tag">03</span>
+              <span>⚙</span>
+            </div>
+            <div class="scene-card-meta">
+              <div class="scene-name-row">
+                <span class="scene-name">Compute Shift</span>
+                <span class="scene-timecode">0:11 - 0:20</span>
+              </div>
+              <div class="scene-desc">Motion graphic: Compute cost comparison curve & prompt query pivot.</div>
+            </div>
+          </div>
+
+          <div class="scene-card-item" onclick="selectScene(4, '00:20.0 - 00:28.0', 'Limitation: Human validation mandatory')">
+            <div class="scene-thumb-preview" style="background:linear-gradient(135deg, #78350F, #451A03);">
+              <span class="scene-thumb-tag">04</span>
+              <span>!</span>
+            </div>
+            <div class="scene-card-meta">
+              <div class="scene-name-row">
+                <span class="scene-name">Epistemic Caveat</span>
+                <span class="scene-timecode">0:20 - 0:28</span>
+              </div>
+              <div class="scene-desc">Split screen: Automated proposal vs human researcher experimental verification.</div>
+            </div>
+          </div>
+
+          <div class="scene-card-item" onclick="selectScene(5, '00:28.0 - 00:35.0', 'Payoff: Prompt testing advice & Outro')">
+            <div class="scene-thumb-preview" style="background:linear-gradient(135deg, #831843, #500724);">
+              <span class="scene-thumb-tag">05</span>
+              <span>↗</span>
+            </div>
+            <div class="scene-card-meta">
+              <div class="scene-name-row">
+                <span class="scene-name">Actionable CTA</span>
+                <span class="scene-timecode">0:28 - 0:35</span>
+              </div>
+              <div class="scene-desc">Branded Nextdecode card: "Test prompts for hypotheses, not just code."</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- CENTER: HERO VIDEO VIEWPORT & PIPELINE NODES -->
+        <div class="panel-viewport">
+          <div class="hero-player-box">
+            <div class="player-screen" id="player-screen">
+              <div class="aurora-bg-mesh"></div>
+              <div class="player-watermark">
+                <span class="watermark-badge" id="player-format-tag">9:16 Vertical</span>
+                <span class="watermark-badge" style="background:rgba(16,185,129,0.8);">1080×1920 · 60fps</span>
+              </div>
+
+              <div class="player-center-graphic">
+                <div style="font-size:38px;margin-bottom:8px;">🎬</div>
+                <div style="font-size:18px;font-weight:800;letter-spacing:-0.4px;" id="player-scene-title">Scene 01: Establishing Hook</div>
+                <div style="font-size:12px;color:var(--text-secondary);" id="player-scene-subtitle">Kinetic typography card overlay</div>
+              </div>
+
+              <div class="screen-subtitle-overlay" id="player-subtitle">
+                "Does AI really speed up AI research, or is it just faster noise?"
+              </div>
+            </div>
+
+            <div class="player-controls">
+              <div class="player-scrubber-row">
+                <button class="tool-btn" id="play-pause-btn" onclick="togglePlay()" style="width:30px;height:30px;border-radius:50%;background:var(--accent-indigo);color:#fff;">▶</button>
+                <div class="scrubber-track" onclick="seekTimeline(event)">
+                  <div class="scrubber-fill" id="scrubber-fill">
+                    <div class="scrubber-head"></div>
+                  </div>
+                </div>
+                <span style="font-size:11px;font-family:var(--font-mono);color:var(--text-muted);" id="timecode-display">00:14.2 / 00:35.0</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- MICRO-PIPELINE STEPPER BELOW PLAYER (Google Flow Style) -->
+          <div class="flow-nodes-strip">
+            <div class="flow-node-item active">
+              <span class="node-title"><span>📝</span> Research Brief</span>
+              <span class="node-sub">Hacker News / ArXiv</span>
+            </div>
+            <span class="flow-arrow-connector">→</span>
+
+            <div class="flow-node-item active">
+              <span class="node-title"><span>🤖</span> AI Director</span>
+              <span class="node-sub">Gemma 3:4b (Local)</span>
+            </div>
+            <span class="flow-arrow-connector">→</span>
+
+            <div class="flow-node-item active">
+              <span class="node-title"><span>🎨</span> B-Roll & Motion</span>
+              <span class="node-sub">Pixabay / Procedural</span>
+            </div>
+            <span class="flow-arrow-connector">→</span>
+
+            <div class="flow-node-item active">
+              <span class="node-title"><span>🎙</span> Voice Prosody</span>
+              <span class="node-sub">Edge TTS (-14.2 LUFS)</span>
+            </div>
+            <span class="flow-arrow-connector">→</span>
+
+            <div class="flow-node-item">
+              <span class="node-title"><span>🎬</span> Assemble</span>
+              <span class="node-sub">FFmpeg Engine</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- RIGHT: RENDER QUEUE & GENERATION SETTINGS -->
+        <div class="panel-sidebar-right">
+          <div class="studio-box">
+            <div class="box-header">
+              <span class="panel-title">Render Queue</span>
+              <span class="status-pill-draft" style="color:var(--accent-cyan);border-color:rgba(6,182,212,0.3);background:rgba(6,182,212,0.1);">1 Active</span>
+            </div>
+
+            <div class="queue-card">
+              <div class="queue-title">AI Accelerates Research? (Short)</div>
+              <div class="queue-meta">
+                <span>1080×1920 · 60fps</span>
+                <span style="color:var(--accent-emerald);font-weight:700;">68% (ETA 00:12)</span>
+              </div>
+              <div class="queue-progress-bar">
+                <div class="queue-progress-fill"></div>
+              </div>
+            </div>
+
+            <div class="queue-card" style="opacity:0.6;">
+              <div class="queue-title">Autonomous Content OS (Longform)</div>
+              <div class="queue-meta">
+                <span>4K · 24fps</span>
+                <span>Queued (Slot 2)</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="studio-box">
+            <div class="box-header">
+              <span class="panel-title">Engine Configuration</span>
+              <span style="font-size:10px;color:var(--text-muted);">v2.4 Core</span>
+            </div>
+
+            <div class="settings-grid-row">
+              <span class="settings-label">Model Pipeline</span>
+              <span class="settings-val">Gemma 3:4b (Ollama)</span>
+            </div>
+            <div class="settings-grid-row">
+              <span class="settings-label">Aspect Ratio</span>
+              <span class="settings-val">9:16 Vertical Short</span>
+            </div>
+            <div class="settings-grid-row">
+              <span class="settings-label">Target Duration</span>
+              <span class="settings-val">35.0 seconds</span>
+            </div>
+            <div class="settings-grid-row">
+              <span class="settings-label">Pacing Target</span>
+              <span class="settings-val">142 WPM (Optimal)</span>
+            </div>
+            <div class="settings-grid-row">
+              <span class="settings-label">Publish Safety</span>
+              <span class="settings-val" style="color:var(--accent-emerald);">Strict Fail-Closed</span>
+            </div>
+          </div>
+
+          <div class="studio-box ai-director-prompt">
+            <div class="ai-director-header">
+              <span>💡</span>
+              <span>AI Director Advice</span>
+            </div>
+            <p style="color:var(--text-secondary);font-size:11px;line-height:1.4;">
+              "Scene 04 epistemic limitation: Pacing is strong. Adding a 0.3s pause before 'human validation' increases retention by +4.2% based on historical drop-off models."
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- BOTTOM MULTI-TRACK TIMELINE -->
+      <section class="timeline-deck">
+        <div class="timeline-toolbar">
+          <div class="timeline-tools-left">
+            <button class="tool-btn active">↖</button>
+            <button class="tool-btn">✂</button>
+            <button class="tool-btn">⇄</button>
+            <button class="tool-btn">T</button>
+            <span style="font-size:11px;font-weight:700;color:var(--text-primary);margin-left:8px;">Timeline Tracks (35.0s)</span>
+          </div>
+
+          <div style="display:flex;align-items:center;gap:12px;font-size:11px;color:var(--text-secondary);">
+            <span>Snapping: <strong>ON</strong></span>
+            <span>Zoom: <strong>100%</strong></span>
+          </div>
+        </div>
+
+        <div class="timeline-canvas-container">
+          <div class="timeline-playhead" id="timeline-playhead"></div>
+
+          <!-- TIME RULER -->
+          <div class="timeline-time-ruler">
+            <span>00:00</span>
+            <span>00:05</span>
+            <span>00:10</span>
+            <span>00:15</span>
+            <span>00:20</span>
+            <span>00:25</span>
+            <span>00:30</span>
+            <span>00:35</span>
+          </div>
+
+          <!-- TRACK 1: VIDEO SCENES -->
+          <div class="timeline-track-row">
+            <span class="track-label">🎬 Video</span>
+            <div class="track-blocks-container">
+              <div class="track-clip-block clip-video" style="flex:4.5;">Scene 01: Hook (4.5s)</div>
+              <div class="track-clip-block clip-video" style="flex:7.0;">Scene 02: ML Servers (7.0s)</div>
+              <div class="track-clip-block clip-video" style="flex:8.5;">Scene 03: Cost Pivot (8.5s)</div>
+              <div class="track-clip-block clip-video" style="flex:8.0;">Scene 04: Human Check (8.0s)</div>
+              <div class="track-clip-block clip-video" style="flex:7.0;">Scene 05: Outro (7.0s)</div>
+            </div>
+          </div>
+
+          <!-- TRACK 2: NARRATION SCRIPT -->
+          <div class="timeline-track-row">
+            <span class="track-label">📝 Script</span>
+            <div class="track-blocks-container">
+              <div class="track-clip-block clip-prompt" style="flex:4.5;">"Does AI speed up research..."</div>
+              <div class="track-clip-block clip-prompt" style="flex:7.0;">"New analysis shows hypotheses acceleration..."</div>
+              <div class="track-clip-block clip-prompt" style="flex:8.5;">"Reduces wasted experiment cycles..."</div>
+              <div class="track-clip-block clip-prompt" style="flex:8.0;">"Bottleneck moves to questions..."</div>
+              <div class="track-clip-block clip-prompt" style="flex:7.0;">"Test prompts for hypotheses..."</div>
+            </div>
+          </div>
+
+          <!-- TRACK 3: AUDIO WAVEFORM -->
+          <div class="timeline-track-row">
+            <span class="track-label">🎙 Audio</span>
+            <div class="track-blocks-container">
+              <div class="track-clip-block clip-audio">
+                <canvas id="waveform-canvas" class="soundwave-canvas"></canvas>
+                <span style="font-size:10px;font-family:var(--font-mono);flex-shrink:0;">-14.2 LUFS</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- END-TO-END WORKFLOW PIPELINE SHOWCASE (Creator Studio Bottom Section) -->
+      <section class="pipeline-showcase-section">
+        <div class="pipeline-header-box">
+          <div class="pipeline-eyebrow">NEXTDECODE Autonomous Pipeline</div>
+          <div class="pipeline-title">Full Creative Production Lifecycle. Governed by AI & Human Truth.</div>
+          <p style="font-size:12.5px;color:var(--text-secondary);">End-to-end orchestration from raw source signal to cryptographically signed release.</p>
+        </div>
+
+        <div class="pipeline-cards-row">
+          <!-- STAGE 1 -->
+          <div class="pipeline-step-card">
+            <div class="step-number-tag">01 · Signal & Research</div>
+            <div class="step-card-title">Atomic Claim Ledger</div>
+            <div class="step-card-body">Extracts factual claims from ArXiv and Hacker News with paragraph-offset provenance.</div>
+            <div style="margin-top:auto;">
+              <span class="step-badge" style="background:rgba(6,182,212,0.15);color:var(--accent-cyan);">2 Sources Verified</span>
+            </div>
+          </div>
+
+          <!-- STAGE 2 -->
+          <div class="pipeline-step-card">
+            <div class="step-number-tag">02 · Script & Voice</div>
+            <div class="step-card-title">Epistemic Script Draft</div>
+            <div class="step-card-body">Local Gemma 3:4b crafts 81-word script with mandatory hook, limitation caveat, and Edge prosody.</div>
+            <div style="margin-top:auto;">
+              <span class="step-badge" style="background:rgba(99,102,241,0.15);color:#A5B4FC;">142 WPM Cadence</span>
+            </div>
+          </div>
+
+          <!-- STAGE 3 -->
+          <div class="pipeline-step-card">
+            <div class="step-number-tag">03 · Assembly & Storyboard</div>
+            <div class="step-card-title">FFmpeg Production</div>
+            <div class="step-card-body">Procedural motion graphics + commercial Pixabay footage assembled into 9:16 vertical render.</div>
+            <div style="margin-top:auto;">
+              <span class="step-badge" style="background:rgba(16,185,129,0.15);color:var(--accent-emerald);">Contact Sheet SHA-256</span>
+            </div>
+          </div>
+
+          <!-- STAGE 4 -->
+          <div class="pipeline-step-card" style="border-color:var(--accent-amber);background:rgba(245,158,11,0.04);">
+            <div class="step-number-tag" style="color:var(--accent-amber);">04 · Review & Gate</div>
+            <div class="step-card-title">Human-in-the-Loop</div>
+            <div class="step-card-body">Operator affirms 7-point checklist. Commits immutable mode 0400 decision record.</div>
+            <div style="margin-top:auto;">
+              <span class="step-badge" style="background:rgba(245,158,11,0.2);color:var(--accent-amber);">Awaiting Operator</span>
+            </div>
+          </div>
+
+          <!-- STAGE 5 -->
+          <div class="pipeline-step-card">
+            <div class="step-number-tag">05 · Publish & Retain</div>
+            <div class="step-card-title">Governed Staging</div>
+            <div class="step-card-body">YouTube Shorts private staging during 20:00 IST window. Public release strictly disabled.</div>
+            <div style="margin-top:auto;">
+              <span class="step-badge" style="background:rgba(16,185,129,0.15);color:var(--accent-emerald);">Fail-Closed Staging</span>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<!-- TOAST MESSAGE -->
+<div class="toast-bar" id="toast-bar">
+  <span>✓</span>
+  <span id="toast-message">Action executed</span>
+</div>
+
+<script>
+/* ==========================================================================
+   INTERACTIVE STUDIO LOGIC & WAVEFORM RENDERING
+   ========================================================================== */
+let isPlaying = false;
+let isVertical = true;
+let currentTime = 14.2;
+const duration = 35.0;
+
+function drawWaveform() {
+  const canvas = document.getElementById('waveform-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  canvas.width = canvas.offsetWidth;
+  canvas.height = 20;
+
+  const w = canvas.width;
+  const h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+
+  const bars = Math.floor(w / 4);
+  for (let i = 0; i < bars; i++) {
+    const x = i * 4;
+    const progress = i / bars;
+    const envelope = Math.sin(progress * Math.PI) * 0.8 + 0.2;
+    const noise = Math.sin(i * 0.8) * Math.cos(i * 1.4) * 0.4 + 0.6;
+    const barHeight = Math.max(3, envelope * noise * h * 0.9);
+
+    const isPast = (x / w) <= (currentTime / duration);
+    ctx.fillStyle = isPast ? '#10B981' : '#047857';
+    ctx.fillRect(x, (h - barHeight) / 2, 2.5, barHeight);
+  }
+}
+
+function togglePlay() {
+  isPlaying = !isPlaying;
+  document.getElementById('play-pause-btn').textContent = isPlaying ? '❚❚' : '▶';
+  showToast(isPlaying ? "Playing timeline playback" : "Playback paused");
+}
+
+function toggleAspectRatio() {
+  isVertical = !isVertical;
+  const screen = document.getElementById('player-screen');
+  const tag = document.getElementById('player-format-tag');
+  if (isVertical) {
+    screen.classList.add('vertical-mode');
+    tag.textContent = "9:16 Vertical";
+    showToast("Switched to 9:16 Vertical Short mode");
+  } else {
+    screen.classList.remove('vertical-mode');
+    tag.textContent = "16:9 Landscape";
+    showToast("Switched to 16:9 Cinema mode");
+  }
+}
+
+function selectScene(num, time, title) {
+  document.querySelectorAll('.scene-card-item').forEach((el, i) => {
+    el.classList.toggle('active', i === num - 1);
+  });
+  document.getElementById('player-scene-title').textContent = `Scene 0${num}: ${title}`;
+  document.getElementById('player-subtitle').textContent = `"${title}"`;
+  currentTime = (num - 1) * 7.0;
+  updateScrubber();
+  showToast(`Jumped to Scene 0${num} (${time})`);
+}
+
+function updateScrubber() {
+  const pct = (currentTime / duration) * 100;
+  document.getElementById('scrubber-fill').style.width = `${pct}%`;
+  document.getElementById('timeline-playhead').style.left = `${pct}%`;
+  document.getElementById('timecode-display').textContent = `00:${currentTime < 10 ? '0' : ''}${currentTime.toFixed(1)} / 00:35.0`;
+  drawWaveform();
+}
+
+function seekTimeline(e) {
+  const rect = e.currentTarget.getBoundingClientRect();
+  const clickX = e.clientX - rect.left;
+  const pct = Math.max(0, Math.min(1, clickX / rect.width));
+  currentTime = pct * duration;
+  updateScrubber();
+}
+
+function switchNav(name) {
+  document.querySelectorAll('.rail-link').forEach(el => {
+    el.classList.toggle('active', el.textContent.includes(name));
+  });
+  showToast(`Navigated to: ${name}`);
+}
+
+function switchMode(mode) {
+  document.querySelectorAll('.mode-tab').forEach(el => {
+    el.classList.toggle('active', el.textContent.includes(mode));
+  });
+  showToast(`Studio Mode: ${mode}`);
+}
+
+function toggleTheme() {
+  const current = document.documentElement.dataset.theme;
+  const next = current === 'dark' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = next;
+  showToast(`Theme switched to: ${next}`);
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast-bar');
+  document.getElementById('toast-message').textContent = msg;
+  t.classList.add('show');
+  clearTimeout(window._toast);
+  window._toast = setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+function triggerAction(action) {
+  showToast(action);
+}
+
+window.addEventListener('resize', drawWaveform);
+window.addEventListener('DOMContentLoaded', () => {
+  drawWaveform();
+  updateScrubber();
+});
+</script>
+</body>
+</html>

@@ -65,10 +65,28 @@ def publisher_of(url: str) -> str:
     return host[4:] if host.lower().startswith("www.") else host
 
 
-def source_type(url: str, text: str = "") -> str:
-    """Coarse source class.  Unknown stays unknown rather than being guessed."""
+def source_type(url: str, text: str = "", title: str = "") -> str:
+    """Coarse source class. Unknown stays unknown rather than being guessed."""
     host = publisher_of(url).lower()
     haystack = (text or "").lower()[:4000]
+    title_text = (title or "").lower()
+    if any(path in str(url).lower() for path in ("/apps/", "/products/", "/directory/", "/catalog/")):
+        return "directory"
+    if any(marker in title_text for marker in ("hacker news", "ai weekly", "agi hunt", "daily.dev", "news digest", "summary")):
+        return "aggregator"
+    if any(marker in haystack for marker in (
+        "original post", "discussion angle", "read the original", "source article",
+        "summary of the original", "based on the original post",
+    )):
+        return "aggregator"
+    # These outlets primarily syndicate, summarize or discuss an originating
+    # report. They can help discovery, but are not independent corroboration.
+    aggregator_hosts = {
+        "agihunt.info", "zeli.app", "aiweekly.my", "daily.dev",
+        "todayforai.com", "news.lavx.hu", "techbytes.app",
+    }
+    if host in aggregator_hosts:
+        return "aggregator"
     if host in WIRE_HOSTS:
         return "wire"
     if any(marker in haystack for marker in RELEASE_MARKERS[:2]):
@@ -171,12 +189,17 @@ def cluster_sources(sources: list[dict], *, threshold: float = 0.45) -> dict:
         digest = hashlib.sha1("|".join(sorted(m["canonical"] for m in members)).encode()).hexdigest()[:8]
         # Clustering already means near-identical text, so any multi-host cluster
         # is one voice republished.  A lone outlet is one independent voice.
-        syndicated = len(hosts) > 1 or _has_release_marker(members)
+        aggregator_only = all(
+            source_type(member["url"], member["text"], member.get("title", "")) == "aggregator"
+            for member in members
+        )
+        syndicated = len(hosts) > 1 or _has_release_marker(members) or aggregator_only
+        independent = len(members) == 1 and not syndicated
         clusters.append({
             "cluster_id": cluster_id,
             "source_count": len(members),
             "hosts": hosts,
-            "independent": len(members) == 1,
+            "independent": independent,
             "syndicated": syndicated,
             "digest": digest,
             "urls": [member["url"] for member in members],
@@ -322,12 +345,15 @@ def extract_anchors(text: str) -> list[dict]:
     for match in _YEAR_RE.finditer(value):
         add("year", match.group(0), True)
     entities: list[str] = []
+    generic_entity_tokens = {"a", "an", "the", "you", "we", "i", "they", "he", "she", "it", "this", "that", "these", "those", "key", "insight"}
     for pattern in (_PROPER_RE, _ACRONYM_RE):
         for match in pattern.finditer(value):
             token = re.sub(r"\s+", " ", match.group(0)).strip()
             token = re.sub(r"^(?:The|A|An)\s+", "", token, flags=re.I)
-            if len(token) < 3:
+            if len(token) < 3 or token.lower() in generic_entity_tokens:
                 continue
+            # Sentence-opening pronouns are not named subjects; treating "You" as
+            # an entity makes unrelated numeric examples look like contradictions.
             # "January 2023" is a date, not a second subject to be matched twice.
             if token.split()[0].lower() in _MONTH_NAMES and len(token.split()) <= 2:
                 continue

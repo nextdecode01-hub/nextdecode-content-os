@@ -1,0 +1,31 @@
+{
+  "schema": "nextdecode.channel-profile.v1",
+  "channel_id": "nextdecode",
+  "name": "NEXTDECODE",
+  "tagline": "Decode what comes next.",
+  "status": "active",
+  "audience_promise": "Evidence-led documentaries and explainers that decode important changes in technology, business, economics and the future.",
+  "editorial_niche": {
+    "primary": ["artificial_intelligence", "technology_innovation", "startups_entrepreneurship", "business_economics", "markets_industry_shifts", "future_trends"],
+    "related": ["semiconductors_computing", "robotics_automation", "cybersecurity_digital_privacy", "internet_platforms_digital_economy", "venture_capital_funding", "corporate_strategy_competition", "global_trade_supply_chains", "energy_batteries_electric_mobility", "digital_infrastructure_cloud_data_centres", "biotechnology_commercial_innovation", "science_to_market_breakthroughs", "work_future_productivity", "technology_policy_regulation", "industry_geopolitics", "consumer_technology_products"],
+    "excluded_unless_directly_tied_to_primary_or_related": ["general_history", "wildlife_nature", "general_sports", "celebrity_entertainment", "general_true_crime", "unrelated_geopolitics", "general_lifestyle"]
+  },
+  "editorial_rules": {
+    "evidence_required": true,
+    "explain_why_it_matters": true,
+    "prefer_specific_entities_and_real_world_consequences": true,
+    "avoid_generic_trend_chasing": true,
+    "avoid_unrelated_viral_topics": true,
+    "faceless_visual_storytelling": true,
+    "human_on_camera_presenter": false
+  },
+  "content_formats": {
+    "enabled": ["youtube_longform", "youtube_shorts", "instagram_reels", "facebook_reels", "youtube_community_posts", "instagram_posts", "instagram_carousels", "facebook_posts", "linkedin_posts", "x_posts"],
+    "longform": {"role": "flagship_deep_dive", "duration_minutes": [6, 8, 10, 12, 15]},
+    "shortform": {"role": "discovery_and_single_idea_explainer", "duration_seconds": [30, 45, 60, 90]},
+    "posts": {"role": "distribution_discussion_and_audience_learning", "must_be_grounded_in_approved_research": true},
+    "repurposing": {"enabled": true, "derive_from_approved_story_package": true, "do_not_copy_identical_caption_across_platforms": true, "preserve_claims_and_source_provenance": true}
+  },
+  "channel_isolation": {"separate_topic_history": true, "separate_category_rotation": true, "separate_audience_feedback": true, "separate_editorial_voice": true},
+  "publishing": {"human_approval_required": true, "automatic_public_publishing": false}
+}

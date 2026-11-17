@@ -23,10 +23,11 @@ def test_provider_state_paths_remain_under_repository_root() -> None:
     assert model_health.ROOT.resolve() == ROOT
     assert model_health.HEALTH_PATH == ROOT / "data" / "model_health.json"
 
-def test_provider_modules_use_the_shared_package_client() -> None:
+def test_retired_omniroute_package_is_not_in_active_routing() -> None:
     multi_model_ai = import_module("app.providers.multi_model_ai")
-    packaged = import_module("app.providers.omniroute_client")
-    assert multi_model_ai.omniroute_client is packaged
+    import_module("app.providers.omniroute_client")  # retained for legacy compatibility only
+    assert "omniroute" not in multi_model_ai.PROVIDER_ORDER
+    assert not hasattr(multi_model_ai, "omniroute_client")
 
 def test_provider_module_cli_help() -> None:
     env = {"PATH": os.environ.get("PATH", ""), "PYTHONDONTWRITEBYTECODE": "1"}

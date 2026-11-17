@@ -19,6 +19,9 @@ google-auth-oauthlib
 # PostgreSQL autonomy control-plane storage
 psycopg[binary]>=3.2,<4
 
+# Editorial interchange for NLE hand-off (FFmpeg remains the renderer)
+opentimelineio>=0.17,<0.18
+
 # Tests
 pytest
 

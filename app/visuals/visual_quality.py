@@ -8,7 +8,7 @@ PUBLISHABLE_VISUAL_MODES = frozenset(
         "owner_recorded",
         "original_footage",
         "licensed_stock",
-        "pexels_stock",
+        "coverr_stock",
         "pixabay_stock",
         "multi_shot_stock",
     }

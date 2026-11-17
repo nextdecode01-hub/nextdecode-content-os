@@ -1,0 +1,141 @@
+/* ==========================================================================
+   NEXTDECODE Control Center — design tokens (sample prototype)
+   Dark-first, ChatGPT-inspired: charcoal surfaces, muted text, subtle borders,
+   restrained green/teal accent. Light theme provided via [data-theme="light"].
+   ========================================================================== */
+
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* Surfaces */
+  --bg: #1d1f23;                 /* page background            */
+  --bg-sidebar: #141518;         /* navigation rail            */
+  --surface: #24262b;            /* cards / panels             */
+  --surface-2: #2b2e33;          /* raised, hover, inputs      */
+  --surface-3: #33363c;          /* active / pressed           */
+  --overlay: rgba(8, 9, 11, 0.62);
+
+  /* Lines */
+  --border: rgba(255, 255, 255, 0.09);
+  --border-strong: rgba(255, 255, 255, 0.18);
+  --hairline: rgba(255, 255, 255, 0.055);
+
+  /* Text */
+  --text: #ececec;
+  --text-muted: #a9b0b7;
+  --text-faint: #7d848b;
+  --text-on-accent: #07130e;
+
+  /* Accent + semantics */
+  --accent: #10a37f;
+  --accent-hover: #12b48c;
+  --accent-soft: rgba(16, 163, 127, 0.14);
+  --info: #3fa9a9;
+  --info-soft: rgba(63, 169, 169, 0.16);
+  --ok: #37b884;
+  --ok-soft: rgba(55, 184, 132, 0.14);
+  --warn: #d6a128;
+  --warn-soft: rgba(214, 161, 40, 0.15);
+  --danger: #e5646e;
+  --danger-soft: rgba(229, 100, 110, 0.14);
+  --running: #7fa3f0;
+  --running-soft: rgba(127, 163, 240, 0.15);
+  --neutral-soft: rgba(255, 255, 255, 0.07);
+
+  /* Focus */
+  --focus-ring: #58c9ab;
+
+  /* Elevation */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.28);
+  --shadow-2: 0 10px 32px rgba(0, 0, 0, 0.45);
+
+  /* Misc */
+  --chart-grid: rgba(255, 255, 255, 0.08);
+  --code-bg: rgba(255, 255, 255, 0.06);
+
+  /* Typography */
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, Menlo, monospace;
+
+  /* Type scale */
+  --fs-xs: 0.75rem;    /* 12 */
+  --fs-sm: 0.8125rem;  /* 13 */
+  --fs-md: 0.875rem;   /* 14 */
+  --fs-lg: 1rem;       /* 16 */
+  --fs-xl: 1.375rem;   /* 22 */
+  --fs-2xl: 1.75rem;   /* 28 */
+
+  /* Spacing (base grid) */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-7: 32px;
+  --sp-8: 40px;
+
+  /* Shape */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-full: 999px;
+
+  /* Density (comfortable default) */
+  --row-pad-y: 10px;
+  --row-pad-x: 14px;
+  --card-pad: 18px;
+  --ctl-h: 34px;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #f7f8f9;
+  --bg-sidebar: #f0f1f3;
+  --surface: #ffffff;
+  --surface-2: #f4f5f6;
+  --surface-3: #e9ebee;
+  --overlay: rgba(23, 26, 31, 0.4);
+
+  --border: rgba(18, 22, 28, 0.11);
+  --border-strong: rgba(18, 22, 28, 0.22);
+  --hairline: rgba(18, 22, 28, 0.06);
+
+  --text: #1e2126;
+  --text-muted: #5a6470;
+  --text-faint: #8a93a0;
+  --text-on-accent: #ffffff;
+
+  --accent: #0d8a6a;
+  --accent-hover: #0a7a5d;
+  --accent-soft: rgba(13, 138, 106, 0.12);
+  --info: #147e8e;
+  --info-soft: rgba(20, 126, 142, 0.12);
+  --ok: #188556;
+  --ok-soft: rgba(24, 133, 86, 0.12);
+  --warn: #96660a;
+  --warn-soft: rgba(150, 102, 10, 0.13);
+  --danger: #c23b45;
+  --danger-soft: rgba(194, 59, 69, 0.11);
+  --running: #3d63c2;
+  --running-soft: rgba(61, 99, 194, 0.12);
+  --neutral-soft: rgba(18, 22, 28, 0.07);
+
+  --focus-ring: #0d8a6a;
+
+  --shadow-1: 0 1px 2px rgba(16, 20, 26, 0.08);
+  --shadow-2: 0 10px 32px rgba(16, 20, 26, 0.18);
+
+  --chart-grid: rgba(18, 22, 28, 0.1);
+  --code-bg: rgba(18, 22, 28, 0.06);
+}
+
+/* Density preference (Settings) */
+:root[data-density="compact"] {
+  --row-pad-y: 6px;
+  --row-pad-x: 10px;
+  --card-pad: 14px;
+  --ctl-h: 30px;
+}

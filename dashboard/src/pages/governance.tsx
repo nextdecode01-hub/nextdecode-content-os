@@ -1,0 +1,49 @@
+import {useMemo} from 'react';
+import {useQuery} from '@tanstack/react-query';
+import {Activity,AlertTriangle,CheckCircle2,ClipboardCheck,FileCheck2,LockKeyhole,RefreshCw,Scale,ShieldAlert,ShieldCheck} from 'lucide-react';
+import {Link} from '@tanstack/react-router';
+import {api} from '../api';
+import {Page,Panel,Badge,Loading,ErrorBox,SectionHead,ReviewStatusNotice,reviewIntegrityBlocked} from '../components';
+
+type ControlState='implemented'|'partial'|'not-connected'|'owner-gated';
+const controls:{id:string;title:string;state:ControlState;detail:string;evidence:string}[]=[
+ {id:'GOV-01',title:'Central publishing authorization',state:'implemented',detail:'A shared authorization module evaluates the publishing boundary and returns a scope-bound decision receipt.',evidence:'app/publish/authorization.py · POLICY_VERSION 1'},
+ {id:'GOV-02',title:'Approval bound to exact artifacts',state:'implemented',detail:'Approval checks bind the review package, metadata and rendered video digests; changed artifacts require a fresh review.',evidence:'app/publish/authorization.py · approval and digest validation'},
+ {id:'GOV-03',title:'Private destination default',state:'implemented',detail:'The authorization module defines private as the default destination. Destination choice remains policy-controlled.',evidence:'DEFAULT_DESTINATION = private'},
+ {id:'GOV-04',title:'Review-first publishing mode',state:'implemented',detail:'The publishing orchestration defaults to review mode; automatic approval is not enabled by default.',evidence:'PUBLISH_MODE defaults to review · AUTO_PUBLISH_APPROVED defaults to false'},
+ {id:'GOV-05',title:'Storyboard review gate',state:'implemented',detail:'Storyboard enforcement defaults to require; warn/off modes are explicit overrides and must be controlled operationally.',evidence:'app/visuals/storyboard.py · STORYBOARD_GATE default require'},
+ {id:'GOV-06',title:'Rights and evidence checks',state:'partial',detail:'The shared publishing boundary checks permitted rights status and blocks missing, unsupported or unverified evidence. Central canonical rights records are not yet connected.',evidence:'authorization.py checks · canonical WP5 persistence not connected'},
+ {id:'GOV-07',title:'Canonical approval lifecycle',state:'not-connected',detail:'The dashboard review surface reads a legacy pending package. It is not the canonical WP5 ApprovalRequest / ApprovalDecision service.',evidence:'Review desk is read-only · canonical lifecycle API absent'},
+ {id:'GOV-08',title:'Workspace-scoped policy administration',state:'owner-gated',detail:'Policy freeze, owner roles, detailed contract closure and implementation authorization remain owner-governed gates.',evidence:'Artifact 08 / Artifact 10 owner-review status'},
+ {id:'GOV-09',title:'Immutable governance audit ledger',state:'partial',detail:'Publishing receipts and artifact evidence exist in local paths; a unified canonical audit/event read model is not connected to this dashboard.',evidence:'Local receipt mechanisms · canonical WP2/WP5 event integration pending'},
+];
+
+const stateLabel:Record<ControlState,string>={implemented:'Code evidence',partial:'Partial', 'not-connected':'Not connected','owner-gated':'Owner gate'};
+const stateTone:Record<ControlState,string>={implemented:'good',partial:'warn','not-connected':'bad','owner-gated':'info'};
+
+export function Governance(){
+ const health=useQuery({queryKey:['health'],queryFn:api.health,refetchInterval:30000});
+ const tasks=useQuery({queryKey:['tasks'],queryFn:api.tasks,refetchInterval:30000});
+ const review=useQuery({queryKey:['pending-review'],queryFn:api.pendingReview,refetchInterval:30000});
+ const counts=useMemo(()=>{const rows=tasks.data?.tasks??[];return {failed:rows.filter(t=>t.status==='failed').length,blocked:rows.filter(t=>t.status==='blocked').length,running:rows.filter(t=>t.status==='running').length,queued:rows.filter(t=>t.status==='queued').length}},[tasks.data]);
+ const refresh=()=>{void health.refetch();void tasks.refetch();void review.refetch()};
+ const implemented=controls.filter(c=>c.state==='implemented').length;
+ const partial=controls.filter(c=>c.state==='partial').length;
+ return <><Page eyebrow="GOVERN / TRUST & CONTROL" title="Governance & access" description="A read-only control room for policy evidence, approval boundaries, publishing safety and unresolved governance dependencies." actions={<button className="btn" onClick={refresh}><RefreshCw size={14}/> Refresh evidence</button>}/>
+ <div className="governance-banner"><div className="governance-banner-icon"><ShieldCheck size={21}/></div><div><b>Human-governed · external actions remain gated</b><p>This page reports implementation evidence and integration gaps. It does not grant access, approve content, change policy or authorize publishing.</p></div><Badge tone="good">Read-only</Badge></div>
+ <div className="governance-metrics">
+ <Panel className="governance-metric"><small>CODE-EVIDENCED CONTROLS</small><strong>{implemented}</strong><span>of {controls.length} tracked controls</span></Panel>
+ <Panel className="governance-metric"><small>PARTIAL CONTROLS</small><strong>{partial}</strong><span>Require integration or durable records</span></Panel>
+ <Panel className="governance-metric"><small>LEGACY REVIEW QUEUE</small><strong>{review.isError?(reviewIntegrityBlocked(review.error)?'Blocked':'Unavailable'):review.isLoading?'…':review.data?'1':'0'}</strong><span>{review.isError?(reviewIntegrityBlocked(review.error)?'Integrity mismatch · approval blocked':'Review endpoint unavailable'):review.isLoading?'Checking legacy review endpoint':review.data?'Pending package returned by legacy endpoint':'No pending package returned'}</span></Panel>
+ <Panel className="governance-metric"><small>RUNTIME EXCEPTIONS</small><strong>{tasks.isError?'Unavailable':tasks.isLoading?'…':counts.failed+counts.blocked}</strong><span>{tasks.isError?'Task telemetry unavailable':tasks.isLoading?'Loading task telemetry':counts.failed+' failed · '+counts.blocked+' blocked local tasks'}</span></Panel>
+ </div>
+ <div className="governance-body">
+ <Panel className="governance-register"><SectionHead label="POLICY CONTROL REGISTER" title="Control implementation evidence" action={<Badge tone="info">{controls.length} controls</Badge>}/><div className="control-list control-grid">{controls.map(c=><article className="control-row" key={c.id}><div className="control-icon">{c.state==='implemented'?<CheckCircle2 size={16}/>:c.state==='partial'?<Activity size={16}/>:c.state==='owner-gated'?<LockKeyhole size={16}/>:<AlertTriangle size={16}/>}</div><div className="control-main"><div className="control-title"><b>{c.title}</b><Badge tone={stateTone[c.state]}>{stateLabel[c.state]}</Badge></div><p>{c.detail}</p><small>{c.id} · {c.evidence}</small></div></article>)} </div></Panel>
+ <div className="governance-side-row">
+ <Panel><SectionHead label="LIVE LOCAL SIGNALS" title="Runtime & review visibility"/>{health.isLoading?<Loading/>:health.error?<ErrorBox error={health.error}/>:<>{tasks.error?<ErrorBox error={tasks.error}/>:null}{review.error?<ReviewStatusNotice error={review.error} onRetry={()=>review.refetch()}/>:null}<div className="governance-signal"><span>Database reachable</span><Badge tone={health.data?.database_accessible?'good':'bad'}>{health.data?.database_accessible?'Yes':'No'}</Badge></div><div className="governance-signal"><span>Active workers</span><b>{health.data?.active_workers??0}</b></div><div className="governance-signal"><span>Running / queued tasks</span><b>{counts.running} / {counts.queued}</b></div><div className="governance-signal"><span>Pending legacy review</span><Badge tone={review.data?'warn':'neutral'}>{review.isError?'Unavailable':review.isLoading?'Checking':review.data?'Present':'None'}</Badge></div><p className="governance-footnote">Signals describe the local autonomy runtime and legacy review endpoint only. They are not canonical WP2/WP3/WP5 records.</p></>}</Panel>
+ <Panel><SectionHead label="NON-NEGOTIABLE BOUNDARIES" title="What this dashboard will not do"/><ul className="governance-rules"><li>Never publish automatically or change a destination from this screen.</li><li>Never treat a review package as an approval decision.</li><li>Never treat approval as protected-action authorization.</li><li>Never present local runtime IDs as canonical workflow or worker identities.</li><li>Never mark a control complete without implementation evidence and tests.</li></ul></Panel>
+ <Panel><SectionHead label="NEXT INTEGRATION GATES" title="Required before governance is complete"/><div className="governance-gates"><div><Badge tone="warn">P0</Badge><span><b>Canonical WP5 lifecycle</b><small>Connect approval requests, decisions and immutable review-package bindings.</small></span></div><div><Badge tone="warn">P0</Badge><span><b>Unified policy & audit read model</b><small>Expose decision IDs, policy versions, evidence references and event lineage.</small></span></div><div><Badge tone="info">Owner</Badge><span><b>Contract freeze & authorization</b><small>Complete owner disposition and explicit implementation authorization.</small></span></div></div><div className="governance-links"><Link to="/reviews"><ClipboardCheck size={14}/> Review desk</Link><Link to="/jobs"><FileCheck2 size={14}/> Production jobs</Link><Link to="/runs"><Activity size={14}/> Runtime tasks</Link></div></Panel>
+ </div></div>
+ <Panel className="governance-disclaimer"><Scale size={16}/><span><b>Evidence standard</b><small>“Code evidence” means a control is visible in the current source code. It does not by itself prove production configuration, live end-to-end behavior, canonical persistence, or release readiness. Owner-gated decisions remain open until explicitly recorded.</small></span><Badge tone="warn">Not release certification</Badge></Panel>
+ </>;
+}

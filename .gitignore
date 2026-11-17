@@ -89,3 +89,10 @@ wsl.localhost/
 /analytics_latest.json
 /workspace.db
 /media/
+
+# Node dependency directories
+node_modules/
+
+# Generated frontend output and dependency artifacts
+**/dist/
+*.tsbuildinfo

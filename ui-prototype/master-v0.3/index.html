@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark" data-nav-open="false">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="NEXTDECODE Control Center — sample dashboard prototype (no backend, sample data only).">
+  <title>Overview · NEXTDECODE Control Center (sample)</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%2310a37f'/%3E%3Cpath d='M7 17V7l10 10V7' stroke='%23071b13' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <script>
+    /* Pre-paint theme + density bootstrap (no FOUC). Same keys as js/theme.js + js/store.js. */
+    (function () {
+      try {
+        var m = localStorage.getItem("nd-cc-theme");
+        if (m !== "dark" && m !== "light" && m !== "system") m = "dark"; /* dark-first default */
+        var dark = m === "system"
+          ? window.matchMedia("(prefers-color-scheme: dark)").matches
+          : m === "dark";
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
+      } catch (e) { document.documentElement.dataset.theme = "dark"; }
+      try {
+        var p = JSON.parse(localStorage.getItem("nd-cc-prefs") || "{}");
+        if (p && p.density) document.documentElement.dataset.density = p.density;
+      } catch (e) { /* ignore */ }
+    })();
+  </script>
+  <link rel="stylesheet" href="styles/tokens.css">
+  <link rel="stylesheet" href="styles/base.css">
+  <link rel="stylesheet" href="styles/layout.css">
+  <link rel="stylesheet" href="styles/components.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to main content</a>
+
+  <div class="app" id="app">
+    <aside class="sidebar" id="sidebar" aria-label="Sidebar">
+      <div class="sidebar__brand">
+        <span class="sidebar__logo" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17V7l10 10V7"/></svg>
+        </span>
+        <span>
+          <span class="sidebar__name">NEXTDECODE</span>
+          <span class="sidebar__tag">Control Center · sample</span>
+        </span>
+      </div>
+
+      <nav class="nav" aria-label="Primary">
+        <div>
+          <div class="nav__group-label" id="navgrp-operate">Operate</div>
+          <ul class="nav__list" aria-labelledby="navgrp-operate">
+            <li><a class="nav__link" data-route="overview" href="#/overview"><span class="nav__glyph" aria-hidden="true"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.6"/></svg></span>Overview</a></li>
+            <li><a class="nav__link" data-route="projects" href="#/projects"><span class="nav__glyph" aria-hidden="true"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 7.2A2.2 2.2 0 0 1 5.7 5h3.4l2 2h7.2a2.2 2.2 0 0 1 2.2 2.2v7.6a2.2 2.2 0 0 1-2.2 2.2H5.7a2.2 2.2 0 0 1-2.2-2.2z"/></svg></span>Projects</a></li>
+            <li><a class="nav__link" data-route="workflows" href="#/workflows"><span class="nav__glyph" aria-hidden="true"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="5.5" cy="6" r="2.2"/><circle cx="18.5" cy="18" r="2.2"/><path d="M7.7 6h5.3a4.5 4.5 0 0 1 4.5 4.5v4.9"/></svg></span>Workflows</a></li>
+            <li><a class="nav__link" data-route="research" href="#/research"><span class="nav__glyph" aria-hidden="true"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.5"/><path d="M15.8 15.8 21 21"/></svg></span>Research</a></li>
+            <li><a class="nav__link" data-route="studio" href="#/studio"><span class="nav__glyph" aria-hidden="true"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="14" rx="2"/><path d="M3.5 9.5h17M8.3 5v4.5M13.3 5v4.5M18 5v4.5"/></svg></span>Studio</a></li>
+          </ul>
+        </div>
+
+        <div>
+          <div class="nav__group-label" id="navgrp-govern">Govern</div>
+          <ul class="nav__list" aria-labelledby="navgrp-govern">
+            <li><a class="nav__link" data-route="review" href="#/review"><span class="nav__glyph" aria-hidden="true"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.2 19 6v5.2c0 4.6-3.4 7.6-7 9-3.6-1.4-7-4.4-7-9V6z"/><path d="m9.2 12 2 2 3.8-4"/></svg></span>Review &amp; Approvals<span class="nav__pill nav__pill--info" title="2 packages pending human review">2</span></a></li>
+            <li><a class="nav__link" data-route="publishing" href="#/publishing"><span class="nav__glyph" aria-hidden="true"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2.5 11 13"/><path d="M21.5 2.5 15 21.5l-4-8.5-8.5-4z"/></svg></span>Publishing<span class="nav__pill nav__pill--danger" title="3 publish authorizations blocked">3</span></a></li>
+          </ul>
+        </div>
+
+        <div>
+          <div class="nav__group-label" id="navgrp-inform">Inform</div>
+          <ul class="nav__list" aria-labelledby="navgrp-inform">
+            <li><a class="nav__link" data-route="analytics" href="#/analytics"><span class="nav__glyph" aria-hidden="true"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 19.5v-8M10.5 19.5v-14M16.5 19.5v-5M3 19.5h18"/></svg></span>Analytics</a></li>
+            <li><a class="nav__link" data-route="operations" href="#/operations"><span class="nav__glyph" aria-hidden="true"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12.5h3.8L9 5.5l4.4 13 2-6H21"/></svg></span>Operations<span class="nav__pill nav__pill--danger" title="2 incidents in window">2</span></a></li>
+          </ul>
+        </div>
+
+        <div>
+          <div class="nav__group-label" id="navgrp-system">System</div>
+          <ul class="nav__list" aria-labelledby="navgrp-system">
+            <li><a class="nav__link" data-route="settings" href="#/settings"><span class="nav__glyph" aria-hidden="true"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v2.6M12 18.6v2.6M2.8 12h2.6M18.6 12h2.6M5.5 5.5l1.8 1.8M16.7 16.7l1.8 1.8M18.5 5.5l-1.8 1.8M7.3 16.7l-1.8 1.8"/></svg></span>Settings</a></li>
+          </ul>
+        </div>
+      </nav>
+
+      <div class="sidebar__foot">
+        <div id="theme-slot"></div>
+        <p class="sidebar__note">Sample prototype. Illustrative data only — no backend, API, storage or publishing. Does not authorize P1 implementation.</p>
+      </div>
+    </aside>
+
+    <div class="nav-backdrop" id="nav-backdrop" aria-hidden="true"></div>
+
+    <div class="maincol">
+      <header class="topbar">
+      <button class="topbar__menu" id="nav-toggle" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+      <div class="topbar__crumbs">
+        <span>Control Center</span>
+        <span class="topbar__sep" aria-hidden="true">/</span>
+        <strong id="crumb-page">Overview</strong>
+      </div>
+      <div class="topbar__actions">
+        <button class="searchbtn" id="palette-open" type="button" aria-label="Search (opens command palette)">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M15.8 15.8 21 21"/></svg>
+          <span class="searchbtn__label">Search</span>
+          <kbd>Ctrl K</kbd>
+        </button>
+        <span class="pill pill--sample" title="All data on every screen is illustrative sample data."><span aria-hidden="true">●</span><span class="pill__text">Sample data</span></span>
+      </div>
+      </header>
+
+      <main class="main" id="main" tabindex="-1" aria-label="Main content">
+        <noscript>
+          <h1>JavaScript is required</h1>
+          <p>This is a static, dependency-free prototype: it renders entirely in the browser and makes no network calls, but it needs JavaScript enabled.</p>
+        </noscript>
+      </main>
+    </div>
+  </div>
+
+  <button class="iconbtn" id="palette-open-m" type="button" aria-label="Open command palette" style="position:fixed;right:14px;bottom:14px;z-index:60;background:var(--surface);border:1px solid var(--border);box-shadow:var(--shadow-1)">
+    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M15.8 15.8 21 21"/></svg>
+  </button>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

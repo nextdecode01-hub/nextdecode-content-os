@@ -81,7 +81,12 @@ class SyndicationTests(unittest.TestCase):
             _source("https://b.example.org/y", UNRELATED),
         ])
         self.assertEqual(len(result["clusters"]), 2)
-        self.assertTrue(all(cluster["independent"] for cluster in result["clusters"]))
+        # Distinct texts keep their own clusters, but a press release is the
+        # issuer's voice, not editorial corroboration: only the independent
+        # research source may count as its own source.
+        by_url = {cluster["hosts"][0]: cluster for cluster in result["clusters"]}
+        self.assertFalse(by_url["a.example.com"]["independent"])
+        self.assertTrue(by_url["b.example.org"]["independent"])
 
 
 class IndependenceTests(unittest.TestCase):

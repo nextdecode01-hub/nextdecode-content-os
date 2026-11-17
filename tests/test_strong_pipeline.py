@@ -16,6 +16,17 @@ from app.script import pipeline as strong_pipeline
 
 
 class TestAssetQueryBuilding(unittest.TestCase):
+    def test_script_punctuation_corruption_is_repaired_before_speech(self):
+        result = strong_pipeline._normalize_script_punctuation({
+            "voice_text": "Can agents research?or not? DeepMind?s system works; today?s test.",
+            "word_count": 99,
+        })
+        self.assertEqual(
+            result["voice_text"],
+            "Can agents research? or not? DeepMind's system works; today's test.",
+        )
+        self.assertEqual(result["word_count"], len(result["voice_text"].split()))
+
     def test_concept_query_for_a_known_subject(self):
         query = script_studio.build_asset_query("robot arm factory automation", "hook")
         self.assertIn("robot", query.lower())
@@ -44,6 +55,102 @@ class TestAssetQueryBuilding(unittest.TestCase):
         )
         self.assertTrue(beats)
         self.assertTrue(any("robot" in beat["shot_hint"].lower() for beat in beats))
+
+
+class TestScriptFailureSafety(unittest.TestCase):
+    def test_automatic_script_mode_fails_closed_when_writer_is_unavailable(self):
+        research = {
+            "topic": "AI research agents",
+            "verdict": "sufficient",
+            "claims": [{"claim": "A verified research claim.", "quote": "A verified research claim.",
+                        "source_url": "https://example.com/report"}],
+        }
+        with patch.dict("os.environ", {"NEXTDECODE_SCRIPT_MODE": "auto"}, clear=False), \
+             patch.object(strong_pipeline.script_studio, "write_script",
+                          side_effect=RuntimeError("provider unavailable")):
+            with self.assertRaisesRegex(RuntimeError, "automatic deterministic fallback is disabled"):
+                strong_pipeline._draft_script("AI research agents", research, 45)
+
+    def test_evidence_reconciliation_does_not_keep_an_unreviewed_script(self):
+        import tempfile
+        ledger = {
+            "claims": [],
+            "script_mapping": {
+                "flags": [{
+                    "flag": "unqualified_partially_supported",
+                    "sentence": "A single-source claim was stated as fact.",
+                }]
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(strong_pipeline.claims_ledger, "build_ledger", return_value=ledger), \
+             patch.object(strong_pipeline.script_studio, "write_script",
+                          side_effect=RuntimeError("rewrite unavailable")):
+            with self.assertRaisesRegex(RuntimeError, "refusing to continue with unresolved claims"):
+                strong_pipeline._build_evidence_checked_script(
+                    "AI research agents", {"claims": []}, {"claims": []},
+                    {"voice_text": "A single-source claim was stated as fact."},
+                    45, Path(tmp),
+                )
+
+
+class TestEditorialScriptReview(unittest.TestCase):
+    def test_qualified_editorial_review_accepts_complete_high_score(self):
+        from app.script import studio
+        review = {
+            "pass": True,
+            "score": 88,
+            "dimensions": {
+                "hook": 4, "clarity": 4, "specificity": 4,
+                "narrative_progression": 4, "insight": 4,
+                "retention": 4, "evidence_alignment": 4,
+            },
+            "issues": [],
+            "rewrite_instructions": [],
+        }
+        with patch.object(studio.multi_model_ai, "generate_for_task_json", return_value=review) as judge:
+            result = studio._review_script_editorial_quality(
+                "AI research agents",
+                {"title": "How research agents check claims", "voice_text": "A specific hook. A clear mechanism."},
+                {"claims": []},
+                45,
+            )
+        self.assertTrue(result["pass"])
+        self.assertEqual(result["score"], 88)
+        judge.assert_called_once()
+        self.assertEqual(judge.call_args.args[0], "script_review")
+
+    def test_editorial_review_rejects_a_low_dimension_even_when_model_says_pass(self):
+        from app.script import studio
+        review = {
+            "pass": True,
+            "score": 91,
+            "dimensions": {
+                "hook": 4, "clarity": 4, "specificity": 2,
+                "narrative_progression": 4, "insight": 4,
+                "retention": 4, "evidence_alignment": 4,
+            },
+            "issues": ["The script is too generic."],
+            "rewrite_instructions": ["Add a concrete example."],
+        }
+        with patch.object(studio.multi_model_ai, "generate_for_task_json", return_value=review):
+            result = studio._review_script_editorial_quality(
+                "AI research agents", {"title": "Generic", "voice_text": "Generic script."},
+                {"claims": []}, 45,
+            )
+        self.assertFalse(result["pass"])
+        self.assertTrue(result["rewrite_instructions"])
+
+    def test_editorial_review_rejects_incomplete_dimension_scores(self):
+        from app.script import studio
+        with patch.object(studio.multi_model_ai, "generate_for_task_json", return_value={
+            "pass": True, "score": 90, "dimensions": {"hook": 5}, "issues": [],
+        }):
+            with self.assertRaisesRegex(RuntimeError, "omitted its dimension scores|invalid clarity score"):
+                studio._review_script_editorial_quality(
+                    "AI research agents", {"title": "Test", "voice_text": "Test."},
+                    {"claims": []}, 45,
+                )
 
 
 class TestShotPlanning(unittest.TestCase):
@@ -134,6 +241,45 @@ class TestModelHealth(unittest.TestCase):
             self.assertEqual(model_health.unhealthy_providers(path=path), ["groq"])
 
 
+class TestProviderQuotaFreshness(unittest.TestCase):
+    def test_stale_quota_snapshot_is_unknown_not_available(self):
+        import json
+        import tempfile
+        from datetime import datetime, timedelta, timezone
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "quota.json"
+            stale = (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat()
+            path.write_text(json.dumps({"checked_at": stale, "providers": {
+                "groq": {"models": {"m1": {"checked_at": stale, "headers": {
+                    "x-ratelimit-remaining-tokens": "7000",
+                    "x-ratelimit-limit-tokens": "8000",
+                }}}}
+            }}))
+            self.assertEqual(model_health.quota_status("groq", model="m1", path=path), "unknown")
+
+    def test_fresh_provider_reported_quota_can_be_available_or_low(self):
+        import json
+        import tempfile
+        from datetime import datetime, timezone
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "quota.json"
+            checked = datetime.now(timezone.utc).isoformat()
+            path.write_text(json.dumps({"checked_at": checked, "providers": {
+                "groq": {"models": {
+                    "available-model": {"checked_at": checked, "headers": {
+                        "x-ratelimit-remaining-tokens": "7000",
+                        "x-ratelimit-limit-tokens": "8000",
+                    }},
+                    "low-model": {"checked_at": checked, "headers": {
+                        "x-ratelimit-remaining-tokens": "500",
+                        "x-ratelimit-limit-tokens": "8000",
+                    }},
+                }}
+            }}))
+            self.assertEqual(model_health.quota_status("groq", model="available-model", path=path), "available")
+            self.assertEqual(model_health.quota_status("groq", model="low-model", path=path), "low")
+
+
 class TestStrongPipelineWiring(unittest.TestCase):
     def test_visual_description_is_honest_about_stock(self):
         assets = [
@@ -163,6 +309,93 @@ class TestStrongPipelineWiring(unittest.TestCase):
         words = strong_pipeline.estimated_words("one two three four", 4.0)
         self.assertEqual(len(words), 4)
         self.assertAlmostEqual(words[-1]["end"], 4.0, places=3)
+
+
+class TestMoETopicNormalization(unittest.TestCase):
+    def test_hyphenated_mixture_of_experts_topic_gets_primary_sources(self):
+        urls = strong_pipeline._candidate_urls(
+            {"topic": "How mixture-of-experts models route tokens"}, []
+        )
+        self.assertIn("https://mistral.ai/news/mixtral-of-experts/", urls)
+        self.assertIn("https://huggingface.co/blog/mixtral", urls)
+        self.assertIn("https://arxiv.org/abs/2401.04088", urls)
+
+    def test_hyphenated_mixture_of_experts_topic_gets_exact_primary_claim(self):
+        topic = "How mixture-of-experts models route tokens"
+        url = "https://mistral.ai/news/mixtral-of-experts/"
+        excerpt = (
+            'At every layer, for every token, a router network chooses two of these groups '
+            '(the "experts") to process the token and combine their output additively.'
+        )
+        research = {"topic": topic, "sources": [{"url": url, "text": excerpt}], "claims": []}
+        result = strong_pipeline._augment_primary_moe_claims(topic, research)
+        self.assertEqual(len(result["claims"]), 1)
+        self.assertEqual(result["claims"][0]["source_url"], url)
+        self.assertIn("two experts", result["claims"][0]["claim"])
+
+
+class TestPinnedResearchSources(unittest.TestCase):
+    def test_explicit_research_urls_are_added_without_replacing_topic_sources(self):
+        urls = (
+            "https://arxiv.org/abs/2607.27191;"
+            "https://deepmind.google/blog/co-scientist-a-multi-agent-ai-partner-to-accelerate-research/"
+        )
+        with patch.dict("os.environ", {"NEXTDECODE_RESEARCH_SOURCE_URLS": urls}):
+            result = strong_pipeline._candidate_urls(
+                {"topic": "Can AI agents conduct open-ended AI research?"},
+                [{"url": "https://www.natureasia.com/en/info/press-releases/detail/9330"}],
+            )
+        self.assertEqual(result[0], "https://arxiv.org/abs/2607.27191")
+        self.assertIn("https://deepmind.google/blog/co-scientist-a-multi-agent-ai-partner-to-accelerate-research/", result)
+        self.assertIn("https://www.natureasia.com/en/info/press-releases/detail/9330", result)
+
+class TestTopicScopedResearchEvidenceBundle(unittest.TestCase):
+    def test_non_moe_topic_can_use_fetched_verbatim_qualified_claims(self):
+        topic = "Does AI accelerate AI research?"
+        url = "https://deepmind.google/discover/blog/ai-research/"
+        source_text = "AI tools can assist researchers with selected workflows and tasks."
+        supported = {
+            "claim_id": "clm_supported", "narration": "AI tools assist selected research tasks.",
+            "quote": "AI tools can assist researchers with selected workflows and tasks.",
+            "source_url": url, "verification": {"status": "supported"},
+            "decision": "include", "excerpt_offset": 0,
+        }
+        qualified = {
+            "claim_id": "clm_qualified", "narration": "The report describes a limited pilot.",
+            "quote": "AI tools can assist researchers with selected workflows and tasks.",
+            "source_url": url, "verification": {"status": "partially_supported"},
+            "decision": "qualify", "excerpt_offset": 0,
+        }
+        unverified = {
+            "claim_id": "clm_unverified", "narration": "AI replaces every researcher.",
+            "quote": "not in source", "source_url": url,
+            "verification": {"status": "unverified"}, "decision": "exclude",
+            "excerpt_offset": None,
+        }
+        ledger = {"claims": [supported, qualified, unverified]}
+        research = {"topic": topic, "sources": [{"url": url, "text": source_text}],
+                    "claims": [{"claim": supported["narration"], "quote": supported["quote"], "source_url": url}]}
+        with patch.object(strong_pipeline.claims_ledger, "build_ledger", return_value=ledger):
+            result = strong_pipeline._script_research_bundle(research)
+        self.assertEqual({item["claim_id"] for item in result["claims"]}, {"clm_supported", "clm_qualified"})
+        self.assertEqual([item["claim_id"] for item in result["qualified_claims"]], ["clm_qualified"])
+        self.assertEqual(result["source_urls"], [url])
+
+    def test_non_moe_topic_does_not_admit_unfetched_or_nonverbatim_qualified_claims(self):
+        topic = "AI research tools"
+        fetched_url = "https://example.org/research"
+        other_url = "https://other.example/research"
+        claim = {
+            "claim_id": "clm_bad", "narration": "A claim without a located excerpt.",
+            "quote": "not found", "source_url": other_url,
+            "verification": {"status": "partially_supported"}, "decision": "qualify",
+            "excerpt_offset": None,
+        }
+        with patch.object(strong_pipeline.claims_ledger, "build_ledger", return_value={"claims": [claim]}):
+            with self.assertRaisesRegex(RuntimeError, "No supported research claims"):
+                strong_pipeline._script_research_bundle({"topic": topic,
+                    "sources": [{"url": fetched_url, "text": "A source with unrelated content."}],
+                    "claims": []})
 
 
 if __name__ == "__main__":

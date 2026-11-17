@@ -41,11 +41,36 @@ def _sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _decision(video_bytes: bytes) -> dict:
-    """A fake authorize_publish decision binding an authorized digest."""
-    return {"status": "authorized", "destination": "private",
-            "metadata_sha256": _sha(b"{synthetic metadata}"),
-            "video_sha256": _sha(video_bytes)}
+def _decision(video_bytes: bytes, *, platform: str, purpose: str = "short") -> dict:
+    """A fake authorize_publish receipt binding an authorized digest.
+
+    Mirrors the full WP5 protected-action receipt contract: scope keys, the
+    canonical binding fields and the derived authorization_id, so the fake
+    satisfies verify_protected_action_decision exactly like a real receipt.
+    """
+    from app.publish import authorization as authorization_module
+    decision = {
+        "policy_version": authorization_module.POLICY_VERSION,
+        "status": "authorized",
+        "action_type": "publish",
+        "platform": platform,
+        "purpose": purpose,
+        "destination": "private",
+        "public_release": None,
+        "approved_at": "2026-11-06T00:00:00+00:00",
+        "reviewer": "test-reviewer",
+        "metadata_sha256": _sha(b"{synthetic metadata}"),
+        "video_sha256": _sha(video_bytes),
+    }
+    binding_fields = (
+        "policy_version", "action_type", "platform", "purpose", "destination",
+        "approved_at", "reviewer", "metadata_sha256", "video_sha256",
+    )
+    decision["authorization_id"] = hashlib.sha256(
+        json.dumps({key: decision[key] for key in binding_fields},
+                   sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return decision
 
 
 class _StubResponse:
@@ -202,7 +227,7 @@ class FacebookUploadBindingTests(_Workspace):
                             ("LEDGER", self.root / "data" / "meta_uploads.json")):
             attr_patch = patch.object(fb, attr, value)
             attr_patch.start(); self.addCleanup(attr_patch.stop)
-        self.decision = _decision(V1)
+        self.decision = _decision(V1, platform="facebook")
 
     def test_positive_unchanged_artifact_transfers_bound_bytes(self):
         captured = {}
@@ -268,7 +293,7 @@ class InstagramServeBindingTests(_Workspace):
                             ("LEDGER", self.root / "data" / "meta_uploads.json")):
             attr_patch = patch.object(ig, attr, value)
             attr_patch.start(); self.addCleanup(attr_patch.stop)
-        self.decision = _decision(V1)
+        self.decision = _decision(V1, platform="instagram")
         self.serve = {"path": None}
 
     def _fake_tunnel(self):
@@ -552,7 +577,7 @@ class YoutubeShortUploadBindingTests(_Workspace):
         self.yt = yt
         patch_SCRIPT_DIR = patch.object(yt, "SCRIPT_DIR", self.root)
         patch_SCRIPT_DIR.start(); self.addCleanup(patch_SCRIPT_DIR.stop)
-        self.decision = _decision(V1)
+        self.decision = _decision(V1, platform="youtube")
         self.media_paths = []
 
     def _actions(self):
@@ -596,7 +621,7 @@ class YoutubeShortUploadBindingTests(_Workspace):
             seen.append(1)
             if len(seen) == 2:  # the library-level re-authorization
                 self.video.write_bytes(V2)
-            return _decision(V1)
+            return _decision(V1, platform="youtube")
 
         with patch.object(self.yt, "authorize_publish", side_effect=authorize_adversarial), \
                 patch.object(self.yt, "get_authenticated_service",
@@ -622,7 +647,7 @@ class YoutubeLongformUploadBindingTests(_Workspace):
         env_patch = patch.dict(os.environ, {"PUBLISH_MODE": "publish",
                                             "AUTO_PUBLISH_APPROVED": "true"}, clear=False)
         env_patch.start(); self.addCleanup(env_patch.stop)
-        self.decision = _decision(V1)
+        self.decision = _decision(V1, platform="youtube_longform", purpose="longform")
         self.media_paths = []
         media_patch = patch.object(self.lg, "MediaFileUpload", _media_stub(self.media_paths))
         media_patch.start(); self.addCleanup(media_patch.stop)
@@ -687,7 +712,7 @@ class OrchestrationTunnelSnapshotTests(_Workspace):
         env_patch.start(); self.addCleanup(env_patch.stop)
         os.environ.pop("INSTAGRAM_VIDEO_URL", None)
         (self.root / "data" / "review_approved.json").write_text("{}", encoding="utf-8")
-        self.decision = _decision(V1)
+        self.decision = _decision(V1, platform="instagram")
         self.tunnel_calls = []
 
         def public_video_url_fake(*, serve_path=None):

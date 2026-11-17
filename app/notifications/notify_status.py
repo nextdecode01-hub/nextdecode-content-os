@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Send safe pipeline status alerts to the configured Telegram chat."""
+"""Send safe pipeline status alerts to the configured Telegram chat.
+
+Outbound notification channel only. It never receives callbacks, polls for
+updates or reads Telegram state; an approval must come from the local reviewer
+flow, never from this module.
+"""
 from __future__ import annotations
 
 import json
@@ -12,7 +17,22 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parents[2]
-load_dotenv(ROOT / ".env", override=True)
+DEFAULT_API_ENV = Path(os.path.expanduser("~/.config/nextdecode/api.env"))
+
+
+def load_env() -> None:
+    """Load ROOT/.env (repo secrets). Falls back to the API env file for
+    TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID when they are absent there, so the
+    API process starts cleanly without duplicated secrets."""
+    load_dotenv(ROOT / ".env", override=True)
+    if os.getenv("TELEGRAM_BOT_TOKEN", "").strip() and os.getenv("TELEGRAM_CHAT_ID", "").strip():
+        return
+    if DEFAULT_API_ENV.is_file():
+        load_dotenv(DEFAULT_API_ENV, override=False)
+
+
+load_env()
+
 
 def env_value(name: str) -> str:
     value = os.getenv(name, "").strip()

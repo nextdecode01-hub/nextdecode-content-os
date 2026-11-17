@@ -5,6 +5,12 @@ from api import main as api_main
 
 def test_task_api_enqueues_only_registered_capabilities(tmp_path, monkeypatch):
     monkeypatch.setenv(api_main.API_KEY_ENV, "test-api-key")
+    # These tests intentionally exercise the local SQLite backend regardless
+    # of a developer/CI PostgreSQL DATABASE_URL inherited from the environment.
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    # These tests intentionally exercise the local SQLite backend regardless
+    # of a developer/CI PostgreSQL DATABASE_URL inherited from the environment.
+    monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.setenv("NEXTDECODE_TASK_DB", str(tmp_path / "tasks.sqlite3"))
     result = api_main.enqueue_task({
         "task_type": "content.short.generate",
@@ -31,6 +37,7 @@ def test_task_api_rejects_unknown_fields():
 
 
 def test_plan_api_creates_safe_short_plan(tmp_path, monkeypatch):
+    monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.setenv(api_main.API_KEY_ENV, "test-api-key")
     monkeypatch.setenv("NEXTDECODE_TASK_DB", str(tmp_path / "plans.sqlite3"))
     result = api_main.create_autonomous_plan({"goal": "Create a YouTube Short about agentic AI"})
@@ -51,6 +58,9 @@ from fastapi.testclient import TestClient
 
 def test_authenticated_http_plan_lifecycle(tmp_path, monkeypatch):
     monkeypatch.setenv(api_main.API_KEY_ENV, "test-http-key")
+    # These tests intentionally exercise the local SQLite backend regardless
+    # of a developer/CI PostgreSQL DATABASE_URL inherited from the environment.
+    monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.setenv("NEXTDECODE_TASK_DB", str(tmp_path / "http.sqlite3"))
     client = TestClient(api_main.app)
     denied = client.post("/plans", json={"goal": "Create a Short about AI"})
@@ -104,6 +114,9 @@ def test_authenticated_autonomy_health_and_dead_letters(monkeypatch):
 
 def test_csv_specialist_is_available_through_authenticated_task_api(tmp_path, monkeypatch):
     monkeypatch.setenv(api_main.API_KEY_ENV, "test-csv-api-key")
+    # These tests intentionally exercise the local SQLite backend regardless
+    # of a developer/CI PostgreSQL DATABASE_URL inherited from the environment.
+    monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.setenv("NEXTDECODE_TASK_DB", str(tmp_path / "csv.sqlite3"))
     result = api_main.enqueue_task({
         "task_type": "data.csv.profile",

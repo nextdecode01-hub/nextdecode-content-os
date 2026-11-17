@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import re
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -18,7 +19,7 @@ SCRIPT_PROFILES = {
     "standard_30s": {"seconds": 30, "min_words": 62, "max_words": 78},
     "standard_35s": {"seconds": 35, "min_words": 72, "max_words": 92},
     "deep_45s": {"seconds": 45, "min_words": 92, "max_words": 118},
-    "deep_60s": {"seconds": 60, "min_words": 128, "max_words": 150},
+    "deep_60s": {"seconds": 60, "min_words": 170, "max_words": 210},
 }
 
 DEFAULT_MIN_SHOTS = 8
@@ -172,10 +173,26 @@ def score_hooks(hooks: list[str], *, topic: str, research: dict | None = None) -
         else:
             reasons.append("poor length")
         
-        # Specificity - contains concrete number/entity
+        # A number is not automatically specificity: an unanchored statistic
+        # can make a hook misleading when research discusses several models.
+        # Prefer a concrete mechanism/entity over a naked parameter count.
+        has_named_model = any(
+            term in hook_clean.lower()
+            for term in ("deepseek", "mixtral", "llama", "qwen", "gemma", "gpt-", "nvidia")
+        )
         if re.search(r'\d+', hook_clean):
-            score += 20
-            reasons.append("has concrete number")
+            if has_named_model:
+                score += 8
+                reasons.append("number tied to a named model/entity")
+            else:
+                score -= 12
+                reasons.append("unanchored numeric hook")
+        if re.match(r"^\s*i\s+(?:read|found|looked|saw|tested|noticed)\b", hook_clean, re.I):
+            score -= 24
+            reasons.append("creator-centric first-person hook")
+        if re.match(r"^\s*you\s+(?:are\s+)?(?:equating|confusing|mixing)\b", hook_clean, re.I):
+            score -= 24
+            reasons.append("accusatory second-person hook")
         # Check for proper nouns/entities (capitalized words not at start)
         cap_words = [w for i, w in enumerate(words) if i > 0 and w and w[0].isupper() and len(w) > 2]
         if cap_words:
@@ -229,7 +246,7 @@ Hooks to judge (pick best 1-3):
 
 Return JSON with: {{"best": [{{"hook": "...", "reason": "..."}}]}} (max 3 items)
 Pick hooks that are specific, create curiosity, avoid clichés."""
-        judge_result = multi_model_ai.generate_json(judge_prompt, temperature=0.3, timeout=30)
+        judge_result = multi_model_ai.generate_for_task_json("script_review", judge_prompt, temperature=0.3, timeout=30)
         best_hooks = judge_result.get('best', [])
         if best_hooks:
             best_set = set()
@@ -240,7 +257,7 @@ Pick hooks that are specific, create curiosity, avoid clichés."""
                     best_set.add(b.strip())
             # Boost scores for LLM-picked hooks
             for r in results:
-                if r['hook'] in best_set:
+                if r['hook'] in best_set and "unanchored numeric hook" not in r["reasons"]:
                     r['score'] += 25
                     r['reasons'].append('LLM judge picked')
     except Exception:
@@ -252,6 +269,19 @@ Pick hooks that are specific, create curiosity, avoid clichés."""
 
 
 VISUAL_CONCEPTS = {
+    "mixture of experts": "mixture of experts neural network architecture diagram",
+    "expert routing": "mixture of experts token routing diagram",
+    "specialist sub-network": "mixture of experts specialist subnetworks diagram",
+    "sub-network": "mixture of experts specialist subnetworks diagram",
+    "deepseek": "DeepSeek V3 mixture of experts architecture diagram",
+    "gating": "neural network router gating diagram",
+    "router": "transformer token routing architecture diagram",
+    "token": "transformer token routing diagram",
+    "expert": "mixture of experts expert modules diagram",
+    "specialist": "specialist neural network expert modules diagram",
+    "company": "business team collaboration meeting",
+    "manager": "neural network router gating diagram",
+    "compute": "GPU server cluster data center",
     "llm": "language model research",
     "large language": "language model research",
     "language model": "language model research",
@@ -355,6 +385,8 @@ QUERY_STOPWORDS = frozenset(
         "august", "september", "october", "november", "december",
         "handle", "handles", "handling", "run", "runs", "running", "spot",
         "spots", "solve", "solves", "actually", "dedicated", "timeboxed",
+        "every", "single", "one", "only", "other", "low", "cost", "costs",
+        "knowledge", "huge", "keeps", "keep", "analyzes", "analyze", "acts", "acting",
         "anything", "requiring", "require", "requires", "right", "wrong",
         "tool", "tools", "intent", "inside", "johannes", "millan",
         "parasuraman", "manzey", "bugs", "developers", "pass", "mechanical",
@@ -499,6 +531,76 @@ def build_shot_hint(topic: str, label: str, text: str = "") -> str:
     return f"{subject} in context, {LABEL_CONCEPTS.get(label, 'supporting scene')}"
 
 
+def normalize_timestamp_timeline(timeline: list, *, duration: float, topic: str = "") -> list[dict]:
+    """Validate a model-authored timecoded storyboard against the exact runtime.
+
+    Timestamps, not a target word-count band, define each beat. Invalid or
+    incomplete timelines are rejected so the caller can use the deterministic
+    sentence allocator rather than silently accepting broken timings.
+    """
+    if not isinstance(timeline, list) or not timeline:
+        return []
+    cleaned: list[dict] = []
+    cursor = 0.0
+    labels = {"hook", "context", "mechanism", "example", "evidence", "turning_point",
+              "implication", "payoff", "cta", "setup", "problem", "solution"}
+    for index, raw in enumerate(timeline):
+        if not isinstance(raw, dict):
+            return []
+        try:
+            start = float(raw.get("start", raw.get("t_start")))
+            end = float(raw.get("end", raw.get("t_end")))
+        except (TypeError, ValueError):
+            return []
+        narration = str(raw.get("narration") or raw.get("text") or "").strip()
+        if not narration or start < 0 or end <= start or end > float(duration) + 0.75:
+            return []
+        # The model may leave tiny gaps for breathing room, but not overlaps or
+        # large dead-air gaps. Normalize small rounding differences.
+        if abs(start - cursor) > 0.35:
+            return []
+        start = cursor
+        if end <= start:
+            return []
+        label = str(raw.get("label") or "mechanism").strip().lower()
+        if label not in labels:
+            label = "mechanism"
+        visual = raw.get("visual") if isinstance(raw.get("visual"), dict) else {}
+        visual_subject = str(visual.get("subject") or raw.get("visual_subject") or topic).strip()
+        visual_action = str(visual.get("action") or raw.get("visual_action") or narration).strip()
+        visual_family = str(visual.get("type") or raw.get("visual_family") or "real_footage").strip().lower()
+        if visual_family not in {"real_footage", "diagram", "chart", "screen_recording", "typography", "motion_graphic", "product_demo"}:
+            return []
+        chart = raw.get("chart") if isinstance(raw.get("chart"), dict) else {}
+        claim_ids = raw.get("source_claim_ids") if isinstance(raw.get("source_claim_ids"), list) else []
+        if visual_family == "chart":
+            points = chart.get("data") if isinstance(chart.get("data"), list) else []
+            numeric_points = [point for point in points if isinstance(point, dict) and any(
+                isinstance(value, (int, float)) and not isinstance(value, bool)
+                for key, value in point.items() if key not in {"label", "name", "category", "date"}
+            )]
+            if not chart.get("title") or not chart.get("type") or not numeric_points or not claim_ids:
+                return []
+        cleaned.append({
+            "label": label, "text": narration,
+            "t_start": round(start, 2), "t_end": round(min(end, duration), 2),
+            "shot_hint": str(raw.get("visual_brief") or visual_action or build_shot_hint(topic, label, narration)).strip(),
+            "visual_family": visual_family,
+            "visual_subject": visual_subject,
+            "visual_action": visual_action,
+            "on_screen_text": str(raw.get("on_screen_text") or "").strip()[:100],
+            "chart_spec": chart,
+            "camera": raw.get("camera") if isinstance(raw.get("camera"), dict) else {},
+            "transition": str(raw.get("transition") or "cut"),
+            "source_claim_ids": claim_ids,
+        })
+        cursor = min(end, duration)
+    if abs(cursor - float(duration)) > 0.75:
+        return []
+    cleaned[-1]["t_end"] = round(float(duration), 2)
+    return cleaned
+
+
 def build_beat_sheet(voice_text: str, *, duration: float, topic: str = "") -> list[dict]:
     sentences = _split_sentences(voice_text)
     if not sentences:
@@ -590,9 +692,9 @@ def plan_shots(beat_sheet: list[dict], *, duration: float, min_shots: int = DEFA
                 elif any(k in visual_lower for k in ['abstract', 'conceptual']):
                     source = 'ai_image'
                 elif any(k in visual_lower for k in ['footage', 'real', 'lab', 'factory', 'outdoor']):
-                    source = 'pexels'
+                    source = 'coverr'
                 else:
-                    source = 'pexels'  # prefer pexels for physical/real-world
+                    source = 'coverr'  # prefer configured Coverr stock for physical/real-world
                 
                 # Generate asset query
                 variants = shot_query_variants(topic, beat['text'])
@@ -607,7 +709,16 @@ def plan_shots(beat_sheet: list[dict], *, duration: float, min_shots: int = DEFA
                     'source': source,
                     'caption': beat['text'][:60],
                     'claim': beat['text'],
-                    'beat_label': beat.get('label', '')
+                    'beat_label': beat.get('label', ''),
+                    'visual_family': beat.get('visual_family', ''),
+                    'visual_subject': beat.get('visual_subject', ''),
+                    'visual_action': beat.get('visual_action', ''),
+                    'visual_brief': beat.get('shot_hint', ''),
+                    'on_screen_text': beat.get('on_screen_text', ''),
+                    'chart_spec': beat.get('chart_spec', {}),
+                    'camera': beat.get('camera', {}),
+                    'transition': beat.get('transition', 'cut'),
+                    'source_claim_ids': beat.get('source_claim_ids', [])
                 })
         else:
             visual = beat['shot_hint']
@@ -617,7 +728,7 @@ def plan_shots(beat_sheet: list[dict], *, duration: float, min_shots: int = DEFA
             elif any(k in visual_lower for k in ['abstract', 'conceptual']):
                 source = 'ai_image'
             else:
-                source = 'pexels'
+                source = 'coverr'
             
             variants = shot_query_variants(topic, beat['text'])
             asset_query = build_asset_query(topic, beat.get('label', ''), beat['text'], len(shots))
@@ -631,7 +742,16 @@ def plan_shots(beat_sheet: list[dict], *, duration: float, min_shots: int = DEFA
                 'source': source,
                 'caption': beat['text'][:60],
                 'claim': beat['text'],
-                'beat_label': beat.get('label', '')
+                'beat_label': beat.get('label', ''),
+                'visual_family': beat.get('visual_family', ''),
+                'visual_subject': beat.get('visual_subject', ''),
+                'visual_action': beat.get('visual_action', ''),
+                'visual_brief': beat.get('shot_hint', ''),
+                'on_screen_text': beat.get('on_screen_text', ''),
+                'chart_spec': beat.get('chart_spec', {}),
+                'camera': beat.get('camera', {}),
+                'transition': beat.get('transition', 'cut'),
+                'source_claim_ids': beat.get('source_claim_ids', [])
             })
     
     # Ensure minimum shots
@@ -664,8 +784,21 @@ def plan_shots(beat_sheet: list[dict], *, duration: float, min_shots: int = DEFA
     while len(shots) > max_shots and len(shots) > min_shots:
         # Merge two shortest consecutive shots
         min_idx = min(range(len(shots)-1), key=lambda i: shots[i]['duration'] + shots[i+1]['duration'])
-        shots[min_idx]['duration'] = round(shots[min_idx]['duration'] + shots[min_idx+1]['duration'], 2)
-        shots[min_idx]['visual'] = shots[min_idx]['visual'] + ' / ' + shots[min_idx+1]['visual']
+        left = shots[min_idx]
+        right = shots[min_idx + 1]
+        left['duration'] = round(left['duration'] + right['duration'], 2)
+        left['visual'] = left['visual'] + ' / ' + right['visual']
+        # Preserve every narration beat in the merged shot's traceability text.
+        # Previously only the first claim survived, so shot planning silently
+        # dropped sentences when the 14-shot ceiling merged adjacent beats.
+        left_claim = str(left.get('claim') or left.get('caption') or '').strip()
+        right_claim = str(right.get('claim') or right.get('caption') or '').strip()
+        if right_claim and right_claim not in left_claim:
+            left['claim'] = (left_claim + ' ' + right_claim).strip()
+        left['asset_query_variants'] = list(dict.fromkeys(
+            list(left.get('asset_query_variants') or [])
+            + list(right.get('asset_query_variants') or [])
+        ))
         del shots[min_idx+1]
         for i, s in enumerate(shots):
             s['index'] = i
@@ -753,14 +886,26 @@ def critique(script: dict, *, research: dict | None = None, topic: str = "") -> 
                 'detail': f"Script does not mention either topic anchor: {', '.join(anchors)}"
             })
 
-    # Word count outside band - need to know duration
-    seconds = script.get('seconds') or 35
-    profile = _get_profile(seconds)
-    if word_count < profile['min_words'] or word_count > profile['max_words']:
-        issues.append({
-            'kind': 'word_count',
-            'detail': f'Word count {word_count} outside band {profile["min_words"]}-{profile["max_words"]}'
-        })
+    if "timeline" in script:
+        timeline = script.get("timeline")
+        normalized_timeline = normalize_timestamp_timeline(
+            timeline if isinstance(timeline, list) else [],
+            duration=float(script.get("seconds") or 35), topic=topic or "",
+        )
+        timeline_text = " ".join(str(item.get("text") or "") for item in normalized_timeline)
+        if not normalized_timeline:
+            issues.append({"kind": "invalid_timeline", "detail": "Missing or invalid model-authored timestamp timeline; provide contiguous beats covering exact runtime with concrete visuals."})
+        elif re.sub(r"\s+", " ", timeline_text).strip() != re.sub(r"\s+", " ", voice_text).strip():
+            issues.append({"kind": "timeline_narration_mismatch", "detail": "Timeline narration must concatenate exactly to voice_text in order."})
+
+    # Runtime is authoritative. Word count is diagnostic only; measured TTS
+    # duration and final render sync are validated by the production pipeline.
+    seconds = float(script.get('seconds') or 35)
+    pace = (word_count / seconds) * 60.0 if seconds > 0 else 0.0
+    if pace > 190:
+        issues.append({'kind': 'speaking_pace', 'detail': f'Estimated pace {pace:.1f} WPM is too fast for clear narration.'})
+    elif 0 < pace < 95:
+        issues.append({'kind': 'speaking_pace', 'detail': f'Estimated pace {pace:.1f} WPM is unusually slow; justify pauses with the visual timeline.'})
     
     # Banned AI-slop phrases
     slop_findings = voice_guide.find_slop(voice_text)
@@ -795,7 +940,41 @@ def critique(script: dict, *, research: dict | None = None, topic: str = "") -> 
             'kind': 'generic_hook',
             'detail': 'Hook is generic'
         })
-    
+    opening = re.split(r"(?<=[.!?])\s+", voice_text.strip(), maxsplit=1)[0].lower()
+    if opening.startswith("standard models use every parameter for every word") or opening.startswith("moe models use only a few"):
+        issues.append({
+            "kind": "weak_hook_tension",
+            "detail": "Opening is a generic/incomplete definition rather than a curiosity-led hook",
+        })
+
+    # Spoken scripts should not read like a source bibliography or an
+    # instruction to continue researching. These patterns were present in
+    # otherwise technically valid scripts and made the narration feel weak.
+    lower_voice = voice_text.lower()
+    weak_editorial_patterns = (
+        (r"\b(?:[a-z][a-z0-9.-]*\s+){0,2}notes that\b", "spoken_source_attribution"),
+        (r"\baccording to [a-z][a-z0-9 .'-]{2,40}", "spoken_source_attribution"),
+        (r"\bcheck the .{0,50}model card\b", "weak_model_card_cta"),
+        (r"\bthe main thing is keeping an eye on\b", "generic_filler"),
+        (r"\bin the end,? it'?s about\b", "generic_filler"),
+        (r"\bthe mechanism is simpler than it sounds\b", "generic_filler"),
+        (r"\bdetails are still emerging\b", "generic_filler"),
+        (r"\bit uses a mixture of experts architecture\b", "generic_definition"),
+        (r"\bpaying for the one you need\b", "misleading_cost_analogy"),
+        (r"\bthis gives you the knowledge of a huge model at the cost of a smaller one\b", "misleading_cost_analogy"),
+        (r"^\s*i\s+(?:read|found|looked|saw|tested|noticed)\b", "creator_centric_opening"),
+        (r"^\s*you\s+(?:are\s+)?(?:equating|confusing|mixing)\b", "accusatory_second_person_hook"),
+        (r"\bacts as a manager\b", "vague_mechanism_metaphor"),
+        (r"\bkeeps compute costs low while maintaining a huge knowledge base\b", "vague_compute_claim"),
+        (r"^\s*moe models use only a few\.?$", "incomplete_definition"),
+    )
+    for pattern, kind in weak_editorial_patterns:
+        if re.search(pattern, lower_voice, re.I):
+            issues.append({
+                'kind': kind,
+                'detail': f"Spoken narration contains a weak editorial pattern: {kind}"
+            })
+
     pass_critique = len(issues) == 0
     score = max(0, 100 - len(issues) * 15 - slop_score_val * 0.5)
     
@@ -807,9 +986,210 @@ def critique(script: dict, *, research: dict | None = None, topic: str = "") -> 
     }
 
 
-def write_script(topic: str, research: dict, *, seconds: int = 35, pillar: str | None = None,
+def _write_script_override(topic: str, research: dict, *, seconds: int,
+                           pillar: str | None, strict_research: bool) -> dict:
+    """Load a curated script while preserving research, editorial and timing gates."""
+    override_path = Path(os.getenv("NEXTDECODE_SCRIPT_OVERRIDE_PATH", "")).expanduser()
+    if not override_path.is_file():
+        raise RuntimeError("NEXTDECODE_SCRIPT_OVERRIDE_PATH does not point to a readable file.")
+    if not isinstance(research, dict) or research.get("verdict") != "sufficient":
+        raise RuntimeError("Script override requires a sufficient research verdict.")
+    if not isinstance(research.get("claims"), list) or not research["claims"]:
+        raise RuntimeError("Script override requires a non-empty verified claim bundle.")
+    try:
+        parsed = json.loads(override_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise RuntimeError(f"Script override could not be read: {type(exc).__name__}") from None
+    if not isinstance(parsed, dict):
+        raise RuntimeError("Script override must contain a JSON object.")
+
+    voice_text = _normalize_text(str(parsed.get("voice_text") or ""))
+    hook = _canonical_hook_sentence(str(parsed.get("hook") or ""))
+    if not voice_text or not hook or not _opening_matches_hook(voice_text, hook):
+        raise RuntimeError("Script override hook must exactly match the opening narration sentence.")
+    word_count = _word_count(voice_text)
+    source_urls = parsed.get("source_urls")
+    if not isinstance(source_urls, list) or not source_urls:
+        raise RuntimeError("Script override must cite its research source URLs.")
+    known_urls = {
+        str(item.get("source_url") or "")
+        for item in research.get("claims") or []
+        if isinstance(item, dict)
+    }
+    known_urls.update(str(url) for url in research.get("source_urls") or [])
+    unknown_urls = [str(url) for url in source_urls if str(url) not in known_urls]
+    if unknown_urls:
+        raise RuntimeError("Script override contains source URLs absent from the research bundle.")
+    critic_result = critique({
+        "title": str(parsed.get("title") or topic)[:60],
+        "voice_text": voice_text,
+        "hook": hook,
+        "source_urls": source_urls,
+        "word_count": word_count,
+        "seconds": seconds,
+        "slop_score": voice_guide.slop_score(voice_text),
+    }, research=research, topic=topic)
+    if strict_research and not critic_result.get("pass"):
+        issues = "; ".join(
+            f"{item.get('kind')}: {item.get('detail')}"
+            for item in critic_result.get("issues", [])
+        )
+        raise RuntimeError("Script override failed editorial critic: " + (issues or "unknown issue"))
+
+    content_pillar = parsed.get("content_pillar") or pillar or "Hype Check"
+    if content_pillar not in voice_guide.PILLAR_NAMES:
+        content_pillar = "Hype Check"
+    platform_copy = parsed.get("platform_copy") if isinstance(parsed.get("platform_copy"), dict) else {}
+    youtube_tags = parsed.get("youtube_tags") if isinstance(parsed.get("youtube_tags"), list) else []
+    instagram_hashtags = parsed.get("instagram_hashtags") if isinstance(parsed.get("instagram_hashtags"), list) else []
+    instagram_caption = re.sub(r"http\S+|#\S+", "", str(platform_copy.get("instagram_caption") or "")).strip()
+    broll_query = str(parsed.get("broll_query") or topic).strip()
+    if len(re.findall(r"[A-Za-z0-9]+", broll_query)) < 2:
+        broll_query = " ".join(re.findall(r"[A-Za-z0-9]+", topic)[:5])
+    beat_sheet = build_beat_sheet(voice_text, duration=float(seconds), topic=topic)
+    shots = plan_shots(beat_sheet, duration=float(seconds), topic=topic)
+    return {
+        "content_pillar": content_pillar,
+        "hook": hook,
+        "title": str(parsed.get("title") or topic).strip()[:60],
+        "voice_text": voice_text,
+        "timeline": [{"start": beat["t_start"], "end": beat["t_end"], "label": beat["label"], "narration": beat["text"], "visual": {"subject": topic, "action": beat["shot_hint"], "type": "motion_graphic"}, "visual_brief": beat["shot_hint"], "on_screen_text": beat["text"][:72], "camera": {"shot_size": "medium", "angle": "eye_level", "movement": "slow_push_in"}, "transition": "cut", "source_claim_ids": []} for beat in beat_sheet],
+        "beat_sheet": beat_sheet,
+        "shots": shots,
+        "broll_query": broll_query,
+        "youtube_tags": [str(item).strip() for item in youtube_tags if str(item).strip()][:8],
+        "instagram_hashtags": [str(item).strip() for item in instagram_hashtags if str(item).strip()][:8],
+        "platform_copy": {
+            "youtube_description": str(platform_copy.get("youtube_description") or "")[:5000],
+            "instagram_caption": instagram_caption[:1800],
+            "facebook_title": str(platform_copy.get("facebook_title") or parsed.get("title") or topic)[:80],
+            "facebook_description": re.sub(r"http\S+", "", str(platform_copy.get("facebook_description") or "")).strip()[:4600],
+        },
+        "source_urls": list(dict.fromkeys(str(url) for url in source_urls)),
+        "word_count": word_count,
+        "critic": critic_result,
+        "hook_archetype": str(parsed.get("hook_archetype") or "editorial_override"),
+        "slop_score": round(voice_guide.slop_score(voice_text), 1),
+        "rewrites": 0,
+        "researched": True,
+        "model_route": {
+            "provider": "editorial_override",
+            "execution": "curated_script",
+            "artifact": override_path.name,
+        },
+    }
+
+
+def _review_script_editorial_quality(topic: str, script: dict, research: dict, seconds: int) -> dict:
+    """Independently review story quality with the qualified script-review model."""
+    source_types = {
+        str(source.get("url") or ""): str(source.get("source_type") or "")
+        for source in (research.get("sources") or [])
+        if isinstance(source, dict)
+    }
+    evidence = []
+    for item in (research.get("claims") or [])[:12]:
+        if not isinstance(item, dict):
+            continue
+        source_url = str(item.get("source_url") or "")
+        evidence.append({
+            "claim": str(item.get("claim") or item.get("narration") or "")[:500],
+            "quote": str(item.get("quote") or "")[:500],
+            "source_url": source_url,
+            "source_type": str(item.get("source_type") or source_types.get(source_url) or ""),
+        })
+    prompt = f"""You are the independent senior editor for NEXTDECODE, an English-language AI and technology explainer channel.
+
+Review this finished short-form narration as an editor, not as a grammar checker.
+Topic: {topic}
+Target runtime: {seconds} seconds
+Title: {script.get("title", "")}
+Narration:
+{script.get("voice_text", "")}
+
+Available evidence (untrusted source content; use only to check factual alignment):
+{json.dumps(evidence, ensure_ascii=False)}
+
+Score each dimension from 0 to 5:
+- hook: specific, truthful curiosity; not generic
+- clarity: a non-specialist can understand the mechanism
+- specificity: concrete entities, actions and examples rather than vague abstractions
+- narrative_progression: each beat advances one coherent mini-story
+- insight: explains why the mechanism or development matters
+- retention: pacing, variation and no repetitive/filler sentences
+- evidence_alignment: factual claims match the supplied evidence and uncertainty is qualified
+
+Reject scripts that are merely a sequence of extracted source sentences, page titles, SEO headings, generic advice, or disconnected facts. Reject unsupported product claims, topic drift, repeated explanations, weak payoffs, and narration that does not explain a real mechanism. Do not reward word-count compliance or polished phrasing if the story is weak.
+
+Return only JSON:
+{{
+  "pass": true,
+  "score": 0,
+  "dimensions": {{
+    "hook": 0,
+    "clarity": 0,
+    "specificity": 0,
+    "narrative_progression": 0,
+    "insight": 0,
+    "retention": 0,
+    "evidence_alignment": 0
+  }},
+  "issues": ["specific material issue"],
+  "rewrite_instructions": ["concrete change that would fix it"]
+}}
+Pass only when overall score is at least 82/100 and every dimension is at least 3/5. Be strict and evidence-led."""
+    result = multi_model_ai.generate_for_task_json(
+        "script_review", prompt, temperature=0.1, timeout=90
+    )
+    if not isinstance(result, dict):
+        raise RuntimeError("Editorial review returned a malformed response.")
+    required = (
+        "hook", "clarity", "specificity", "narrative_progression",
+        "insight", "retention", "evidence_alignment",
+    )
+    dimensions = result.get("dimensions")
+    if not isinstance(dimensions, dict):
+        raise RuntimeError("Editorial review omitted its dimension scores.")
+    normalized = {}
+    for name in required:
+        value = dimensions.get(name)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= float(value) <= 5:
+            raise RuntimeError(f"Editorial review returned an invalid {name} score.")
+        normalized[name] = round(float(value), 2)
+    score = result.get("score")
+    if isinstance(score, bool) or not isinstance(score, (int, float)) or not 0 <= float(score) <= 100:
+        raise RuntimeError("Editorial review returned an invalid overall score.")
+    issues = result.get("issues")
+    if not isinstance(issues, list):
+        raise RuntimeError("Editorial review omitted its issue list.")
+    issues = [str(item).strip()[:300] for item in issues if str(item).strip()]
+    passed = (
+        result.get("pass") is True
+        and float(score) >= 82
+        and min(normalized.values()) >= 3
+    )
+    if not passed and not issues:
+        issues = ["The script did not meet the independent editorial quality threshold."]
+    instructions = result.get("rewrite_instructions")
+    if not isinstance(instructions, list):
+        instructions = []
+    return {
+        "pass": passed,
+        "score": round(float(score), 1),
+        "dimensions": normalized,
+        "issues": issues[:8],
+        "rewrite_instructions": [str(item).strip()[:300] for item in instructions if str(item).strip()][:6],
+    }
+
+
+def write_script(topic: str, research: dict, *, seconds: int = 60, pillar: str | None = None,
                  max_rewrites: int = 3, provider: str | None = None,
-                 strict_research: bool = True) -> dict:
+                 strict_research: bool = True,
+                 additional_constraints: list[str] | None = None) -> dict:
+    if os.getenv("NEXTDECODE_SCRIPT_OVERRIDE_PATH", "").strip():
+        return _write_script_override(
+            topic, research, seconds=seconds, pillar=pillar, strict_research=strict_research
+        )
     # Check for insufficient research
     if research and research.get('verdict') == 'insufficient':
         if strict_research:
@@ -914,49 +1294,110 @@ def write_script(topic: str, research: dict, *, seconds: int = 35, pillar: str |
         'source_urls': research.get('source_urls', []),
         'summary': research.get('summary', '')
     }
+    # Hooks only need verbatim claim statements to stay grounded, not verbatim
+    # quotes/source URLs: hook candidates go out 4x before the script call, and
+    # sending the full bundle each time needlessly burns a provider's TPM window.
+    hook_facts = [
+        str(item.get('claim') or '').strip()
+        for item in (research.get('claims') or [])
+        if isinstance(item, dict) and str(item.get('claim') or '').strip()
+    ][:8]
+    hook_bundle = json.dumps(
+        {'claims': hook_facts,
+         'summary': str(research.get('summary') or '').strip()[:400]},
+        ensure_ascii=False,
+    )
     
-    # Generate hooks first, one per archetype, in parallel
+    # Generate hooks first, one per archetype. Local CPU models use a smaller,
+    # sequential ensemble to avoid saturating Ollama with long-context requests.
+    local_ollama = (
+        os.getenv("AI_GENERATION_PROVIDER", "auto").strip().lower() == "ollama"
+        and os.getenv("NEXTDECODE_AUTONOMY_MODE", "").strip().lower() not in {"1", "true", "yes"}
+    )
+    # Keep the hook ensemble bounded for free-tier providers. Ten parallel
+    # calls were needlessly consuming quota before the actual script request.
+    hook_archetypes = voice_guide.HOOK_ARCHETYPES[:4]
     hook_prompts = []
-    for arch in voice_guide.HOOK_ARCHETYPES[:10]:  # N=8..10
+    # The script writer still needs the full bundle for quote fidelity, but an
+    # identical quote/claim is emitted once (pretty-printing was dropped too) so a
+    # 6k-token-class prompt fits a free-tier per-minute token window.
+    tight_claims = []
+    for item in research_bundle['claims']:
+        if not isinstance(item, dict):
+            continue
+        claim = str(item.get('claim') or '').strip()
+        quote = str(item.get('quote') or '').strip()
+        tight = dict(item)
+        if claim and quote == claim:
+            tight.pop('quote', None)
+        tight_claims.append(tight)
+    script_bundle_json = json.dumps(
+        {'claims': tight_claims, 'source_urls': research_bundle['source_urls'], 'summary': research_bundle['summary']},
+        ensure_ascii=False,
+    )
+    for arch in hook_archetypes:
         hook_prompts.append((arch, f"""{voice_block}
 
 {hook_instr}
 
 Topic: {topic}
-Research: {json.dumps(research_bundle, ensure_ascii=False)}
+Research: {hook_bundle}
 
 Generate ONE hook in the style of archetype '{arch['id']}' ({arch['name']}): {arch['description']}
 Rules: {arch['rules']}
 Example: {arch['example']}
 
+Editorial standard:
+- Make the viewer curious about a real mechanism, surprising trade-off, or consequence.
+- Prefer a direct question or tension that puts the viewer and subject first.
+- The hook must contain a clear curiosity gap or contrast; prefer a direct question.
+- Never open with "I read", "I found", "I looked at", "You are equating", "You are confusing", or any creator-centric/accusatory process narration.
+- Do not use a statistic or parameter count unless the same sentence names the exact model and the supplied research directly ties that number to it.
+- Do not invent a model, number, result, or causal claim.
+- Sound like a sharp human tech journalist, not a marketing headline.
 The hook must be 4-16 words, specific, no banned phrases, must not start with generic openers.
 Return just the hook text."""))
 
     def _make_hook(item) -> str:
         arch, hook_prompt = item
         try:
-            hook_text = multi_model_ai.generate(hook_prompt, provider=provider) if provider else multi_model_ai.generate(hook_prompt)
+            if provider:
+                hook_text = multi_model_ai.generate(hook_prompt, provider=provider)
+            elif local_ollama or multi_model_ai._autonomy_local_only():
+                hook_text = multi_model_ai.generate(hook_prompt, timeout=60, num_predict=64)
+            else:
+                from app.providers import model_router
+                routed = model_router.generate_for_task(
+                    "script_drafting", hook_prompt, timeout=60,
+                    json_mode=False, temperature=0.35,
+                )
+                hook_text = str(routed.get("text") or "")
             cleaned = hook_text.strip().strip('"').strip("'")
-            return cleaned or f"{topic}: one specific detail changes the picture."
+            return cleaned
         except Exception:
-            return f"{topic}: one specific detail changes the picture."
+            # Do not turn a failed model call into a fake AI-generated hook.
+            return ""
 
-    hooks_candidates = []
+    generated_hooks = []
     try:
-        with ThreadPoolExecutor(max_workers=min(5, len(hook_prompts))) as pool:
-            hooks_candidates = list(pool.map(_make_hook, hook_prompts))
+        with ThreadPoolExecutor(max_workers=1 if local_ollama else min(2, len(hook_prompts))) as pool:
+            generated_hooks = list(pool.map(_make_hook, hook_prompts))
     except Exception:
-        hooks_candidates = [_make_hook(item) for item in hook_prompts]
-    
+        generated_hooks = [_make_hook(item) for item in hook_prompts]
+    hook_archetype_by_text = {
+        hook: item[0].get("id", "plain_language")
+        for item, hook in zip(hook_prompts, generated_hooks)
+        if hook
+    }
+    hooks_candidates = list(hook_archetype_by_text)
+    if not hooks_candidates:
+        raise RuntimeError("Qualified hook generation failed; refusing a generic placeholder hook.")
+
     scored_hooks = score_hooks(hooks_candidates, topic=topic, research=research)
     best_hook = scored_hooks[0]['hook'] if scored_hooks else f"{topic} has a key detail worth knowing."
-    best_archetype = scored_hooks[0].get('archetype', 'plain_language') if scored_hooks else 'plain_language'
-    
-    # Find archetype for best hook
-    for i, h in enumerate(hooks_candidates):
-        if h == best_hook and i < len(voice_guide.HOOK_ARCHETYPES):
-            best_archetype = voice_guide.HOOK_ARCHETYPES[i]['id']
-            break
+    best_archetype = hook_archetype_by_text.get(
+        best_hook, scored_hooks[0].get('archetype', 'plain_language') if scored_hooks else 'plain_language'
+    )
     
     rewrites = 0
     source_urls = research.get('source_urls', [])
@@ -970,6 +1411,10 @@ Return just the hook text."""))
         issues_text = ""
         if critic_issues:
             issues_text = "\n\nCRITIC ISSUES TO FIX:\n" + "\n".join([f"- {i['kind']}: {i['detail']}" for i in critic_issues])
+        if additional_constraints:
+            issues_text += "\n\nMANDATORY EVIDENCE-LED REWRITE INSTRUCTIONS:\n" + "\n".join(
+                f"- {str(item).strip()}" for item in additional_constraints if str(item).strip()
+            )
         
         return f"""{voice_block}
 
@@ -977,21 +1422,40 @@ Return just the hook text."""))
 
 Topic: {topic}
 Content pillar: {pillar or 'auto-select best fit'}
-Duration: {seconds} seconds
-Word count band: {profile['min_words']}-{profile['max_words']} words
+Target runtime: exactly {seconds} seconds
+Runtime is authoritative; do not target a fixed word count. Write natural narration at a comfortable 135-155 spoken words per minute, with intentional pauses and visual breathing room.
 
 Research bundle (claims with verbatim quotes + source urls):
-{json.dumps(research_bundle, ensure_ascii=False, indent=2)}
+{script_bundle_json}
 
-HARD CONSTRAINTS:
+HARD EDITORIAL CONSTRAINTS:
 - First sentence MUST be exactly this hook: {best_hook}
-- Word count must be {profile['min_words']}-{profile['max_words']} words
-- NO invented numbers. Every factual claim must traceable to a research quote
-- Every claim needs support from the research quotes
-- No banned AI-slop phrases
-- No "In this video"/"Today we"/"Did you know"
-- Title must be <= 60 chars
-- Stay on the exact topic; never substitute a different product, company, or story
+- Create a timecoded beat sheet from 0.00 to exactly {seconds} seconds. Every beat must have contiguous start/end timestamps, narration, story label, concrete visual brief, visual type, on-screen text, camera direction and transition.
+- Runtime is the contract, not a word-count band. Keep natural narration around 135-155 WPM on average; never pad or remove useful substance just to hit a word target.
+- Timeline narration segments must concatenate to voice_text in the same order. The first segment must be the selected hook.
+- Change visual language every 2-4 seconds unless a deliberate hold is justified. Define visual.subject, visual.action, visual.type (real_footage, diagram, chart, screen_recording, typography, motion_graphic or product_demo), visual_brief, on_screen_text, camera (shot_size, angle, movement), transition and source_claim_ids.
+- Use charts only when supplied evidence contains comparable numeric data. Every chart must specify chart type, title, axes, units, data points and source_claim_ids. Never invent a number or chart.
+- Use genuine screen recording/product demo for software UI; never fabricate screenshots. Use labelled diagrams for mechanisms, licensed real footage for people/events, and original vector motion graphics when suitable footage is unavailable.
+- NO invented numbers. Do not use a number merely because it appears somewhere in the research bundle: the source must tie it to the same named model, version, metric and context.
+- Preserve every numeric value and unit exactly as written in its supporting quote; do not convert digits into words or change units (for example, keep "$0.05 per 1,000" rather than "five cents per thousand").
+- Every factual claim must be traceable to a specific research quote; prefer primary or technically authoritative sources.
+- Claims marked qualify/partially_supported must be explicitly attributed and hedged in narration (for example, "one deployment write-up estimates..."); never state a single-source estimate as an established fact.
+- Do not speak full URLs or use long academic citations. Source URLs belong in metadata, but qualified claims still require natural spoken attribution.
+- Write for the ear: natural spoken English, varied sentence lengths, strong verbs, specific nouns, no academic throat-clearing.
+- Build a clear mini-story: hook with a concrete tension; show one real example; explain the mechanism in sequence; reveal the trade-off; finish with a memorable implication.
+- Do not use incomplete filler such as "MoE models use only a few." State what is selected and why.
+- Avoid vague contrast lines such as "standard models use every parameter for every word" unless you explain the exact dense-vs-sparse distinction accurately.
+- Explain the mechanism step by step. The viewer should be able to picture what happens to one token/request.
+- Never repeat the same mechanism in consecutive sentences. Each beat must advance the explanation.
+- Prefer exact operational verbs ("scores", "routes", "selects", "activates", "stores") over vague metaphors ("acts as a manager", "keeps costs low", "maintains a huge knowledge base").
+- Use one concrete analogy only if it is technically faithful. Never imply sparse activation removes the cost of storing inactive weights.
+- Include a specific, evidence-backed example only when the source establishes the exact model and configuration.
+- Include one real trade-off or limitation, not a generic disclaimer.
+- End with a memorable insight or consequence. Do not end with "check the model card", "read more", or a generic call to action.
+- Each sentence must add a new piece of information. Remove filler, repeated claims, and transitions such as "It uses...", "the main thing is...", "the takeaway is..." when they add no substance.
+- No banned AI-slop phrases; no "In this video"/"Today we"/"Did you know".
+- Title must be <= 60 chars.
+- Stay on the exact topic; never substitute a different product, company, or story.
 - Include source_urls from research
 
 {issues_text}
@@ -1002,6 +1466,7 @@ Return ONLY valid JSON with these fields:
   "hook": "{best_hook}",
   "title": "...",
   "voice_text": "... full script starting with hook ...",
+  "timeline": [{{"start":0.0,"end":3.2,"label":"hook","narration":"Exact spoken words","visual":{{"subject":"specific subject","action":"observable action","type":"real_footage"}},"visual_brief":"Specific 9:16 shot, subject, action, setting, composition and focal point","on_screen_text":"Short phrase","camera":{{"shot_size":"close_up","angle":"eye_level","movement":"slow_push_in"}},"transition":"cut","source_claim_ids":[]}}],
   "broll_query": "...",
   "youtube_tags": ["..."],
   "instagram_hashtags": ["..."],
@@ -1016,30 +1481,19 @@ Return ONLY valid JSON with these fields:
     
     current_prompt = build_prompt()
     script_result = None
-    
+    editorial_review_attempts = 0
+
     for rewrite_count in range(max_rewrites + 1):
         try:
-            parsed = multi_model_ai.generate_json(current_prompt, temperature=0.7, timeout=120)
-        except Exception as e:
-            # If LLM fails, create a fallback
-            parsed = {
-                "content_pillar": pillar or "Hype Check",
-                "hook": best_hook,
-                "title": topic[:60],
-                "voice_text": f"{best_hook} {topic} involves specific mechanisms worth understanding. Research shows concrete details matter here. One key limitation is that not all aspects are clear yet. The practical takeaway is to focus on verified facts. In the end, it's about separating claims from evidence.",
-                "broll_query": topic.lower().replace(' ', ' ')[:30],
-                "youtube_tags": ["tech"],
-                "instagram_hashtags": ["#tech"],
-                "platform_copy": {
-                    "youtube_description": f"{topic} explained with evidence.",
-                    "instagram_caption": f"A look at {topic} based on research.",
-                    "facebook_title": topic[:80],
-                    "facebook_description": f"Examining {topic} with focus on evidence."
-                },
-                "source_urls": source_urls[:3] if source_urls else []
-            }
+            parsed = multi_model_ai.generate_for_task_json("script_drafting", current_prompt, temperature=0.7, timeout=300)
+        except Exception as exc:
+            raise RuntimeError(
+                "Qualified script-drafting model request failed "
+                f"({type(exc).__name__}); no generic narration fallback is permitted"
+            ) from None
         
         voice_text = _normalize_text(parsed.get('voice_text', ''))
+        original_voice_text = voice_text
         hook_result = _canonical_hook_sentence(str(parsed.get('hook') or best_hook))
         # Deterministically repair the opening once; never ask the LLM to solve
         # a formatting invariant. If the first sentence is already the same
@@ -1055,6 +1509,17 @@ Return ONLY valid JSON with these fields:
                 voice_text = hook_result + (" " + remainder if remainder else "")
             else:
                 voice_text = hook_result
+            # Synchronize the first timestamped narration beat when the deterministic
+            # hook repair replaces the model's opening sentence.
+            timeline = parsed.get("timeline") if isinstance(parsed, dict) else None
+            if isinstance(timeline, list) and timeline:
+                timeline_text = " ".join(str(item.get("narration") or item.get("text") or "") for item in timeline if isinstance(item, dict)).strip()
+                if re.sub(r"\s+", " ", timeline_text) == re.sub(r"\s+", " ", original_voice_text).strip():
+                    first = timeline[0]
+                    first_text = str(first.get("narration") or first.get("text") or "")
+                    first_sentences = _split_sentences(first_text)
+                    remainder = first_text[len(first_sentences[0]):].lstrip() if first_sentences else ""
+                    first["narration"] = hook_result + (" " + remainder if remainder else "")
         
         word_count_res = _word_count(voice_text)
         critic_res = critique({
@@ -1064,9 +1529,54 @@ Return ONLY valid JSON with these fields:
             'source_urls': parsed.get('source_urls', source_urls),
             'word_count': word_count_res,
             'seconds': seconds,
+            'timeline': parsed.get('timeline'),
             'slop_score': voice_guide.slop_score(voice_text)
         }, research=research, topic=topic)
-        
+
+        # A model-authored timeline that does not concatenate to voice_text
+        # exactly stays a hard failure for the gate; what changes here is that
+        # this rewrite iteration gets corrective feedback instead of the pipeline
+        # dying silently at the final validation. A word-count allocator is
+        # still never an accepted fallback.
+        timeline_probe = parsed.get('timeline') if isinstance(parsed, dict) else []
+        probe_sheet = normalize_timestamp_timeline(timeline_probe, duration=float(seconds), topic=topic)
+        probe_text = " ".join(str(item.get("text") or "") for item in probe_sheet).strip()
+        if (
+            not probe_sheet
+            or re.sub(r"\s+", " ", probe_text).strip() != re.sub(r"\s+", " ", voice_text).strip()
+        ):
+            critic_res = dict(critic_res)
+            critic_res["pass"] = False
+            critic_res.setdefault("issues", []).append({
+                "kind": "timeline",
+                "detail": "The timecoded beat sheet must start at exactly 0.00, be contiguous with no gaps above 0.35s, overlap nothing, end exactly at the target runtime (for example 45.00), and have narration segments that concatenate exactly to voice_text in the same order with the selected hook as the first segment. Punctuation must match voice_text exactly.",
+            })
+
+        if critic_res.get("pass"):
+            editorial_review = _review_script_editorial_quality(
+                topic,
+                {"title": parsed.get("title", topic), "voice_text": voice_text},
+                research,
+                seconds,
+            )
+            critic_res["editorial_review"] = editorial_review
+            if not editorial_review["pass"]:
+                editorial_review_attempts += 1
+                critic_res["pass"] = False
+                critic_res.setdefault("issues", [])
+                critic_res["issues"].extend(
+                    {"kind": "editorial_quality", "detail": issue}
+                    for issue in editorial_review["issues"]
+                )
+                critic_res["issues"].extend(
+                    {"kind": "editorial_rewrite", "detail": instruction}
+                    for instruction in editorial_review["rewrite_instructions"]
+                )
+                if editorial_review_attempts >= 2:
+                    raise RuntimeError(
+                        "Script failed independent editorial review after one targeted rewrite."
+                    )
+
         if critic_res['pass'] or rewrite_count == max_rewrites:
             rewrites = rewrite_count
             script_result = {
@@ -1098,7 +1608,13 @@ Return ONLY valid JSON with these fields:
     word_count_final = script_result['word_count']
     critic_final = script_result['critic']
     
-    beat_sheet = build_beat_sheet(voice_text_final, duration=float(seconds), topic=topic)
+    beat_sheet = normalize_timestamp_timeline(
+        parsed_final.get('timeline') if isinstance(parsed_final, dict) else [],
+        duration=float(seconds), topic=topic,
+    )
+    timeline_text = " ".join(str(item.get("text") or "") for item in beat_sheet).strip()
+    if not beat_sheet or re.sub(r"\s+", " ", timeline_text) != re.sub(r"\s+", " ", voice_text_final).strip():
+        raise RuntimeError("Model-authored timestamp timeline is missing, invalid, or does not match voice_text; regenerate rather than silently allocating by word count.")
     shots = plan_shots(beat_sheet, duration=float(seconds), topic=topic)
     
     title = str(parsed_final.get('title', topic)).strip()[:60]
@@ -1154,6 +1670,7 @@ Return ONLY valid JSON with these fields:
         'hook': hook_final,
         'title': title,
         'voice_text': voice_text_final,
+        'timeline': parsed_final.get('timeline', []),
         'beat_sheet': beat_sheet,
         'shots': shots,
         'broll_query': broll_query,
@@ -1171,9 +1688,100 @@ Return ONLY valid JSON with these fields:
         'hook_archetype': best_archetype,
         'slop_score': round(slop_score_final, 1),
         'rewrites': rewrites,
-        'researched': True
+        'researched': True,
+        'model_route': parsed_final.get('_nextdecode_model_route', {})
     }
 
+
+def build_verified_moe_script(research: dict, *, seconds: int = 45,
+                            topic: str = "How AI Models Activate a Few Experts") -> dict | None:
+    """Evidence-bounded fallback for Mixtral routing explainers.
+
+    Only claims explicitly selected for inclusion and verified as supported
+    may qualify the fallback. Single-source statements are attributed in the
+    narration. The template never invents speed, compute, memory or cost claims.
+    """
+    eligible = []
+    for item in research.get("claims") or []:
+        if not isinstance(item, dict):
+            continue
+        quote = str(item.get("quote") or "")
+        claim = str(item.get("claim") or item.get("narration") or "")
+        decision = str(item.get("decision") or "include")
+        status = str((item.get("verification") or {}).get("status") or "supported")
+        source = str(item.get("source_url") or "")
+        if not quote:
+            continue
+        if not (
+            (decision == "include" and status == "supported")
+            or (decision == "qualify" and status == "partially_supported")
+        ):
+            continue
+        if not any(host in source.lower() for host in ("mistral.ai", "huggingface.co", "arxiv.org")):
+            continue
+        eligible.append({**item, "quote": quote, "claim": claim, "source_url": source})
+
+    evidence_text = " ".join(
+        f"{item['claim']} {item['quote']}" for item in eligible
+    ).lower()
+    # Entity and mechanism must both come from the evidence, not the topic label.
+    has_mixtral = "mixtral" in evidence_text
+    has_router_two = (
+        "router" in evidence_text and "two" in evidence_text and "expert" in evidence_text
+    )
+    has_sparse = "sparse" in evidence_text
+    if not (has_mixtral and has_router_two and has_sparse):
+        return None
+
+    source_domains = {
+        str(item.get("source_url") or "").lower()
+        for item in eligible
+    }
+    voice_text = (
+        "What does a mixture-of-experts model do when a token arrives? "
+        "For Mixtral, the model is a sparse mixture-of-experts design with open weights. "
+        "Mistral's Mixtral design specifies that a router selects two experts for each token at every layer. "
+        "For Mixtral, the choice is made for each token, not once for the whole prompt. "
+        "Routing happens again as each token reaches another layer. "
+        "Think of the experts as specialist networks inside one model. "
+        "In Mixtral's configuration, sparse routing means only a selected subset is used for a token. "
+        "For Mixtral, the key sequence is token, router, selected experts, then the combined output. "
+        "For Mixtral, token-by-token selection is the central idea behind sparse expert routing."
+    )
+
+    first_sentence = _split_sentences(voice_text)[0]
+    beat_sheet = build_beat_sheet(voice_text, duration=float(seconds), topic=topic)
+    shots = plan_shots(beat_sheet, duration=float(seconds), topic=topic)
+    script = {
+        "content_pillar": "How It Works",
+        "hook": first_sentence,
+        "title": "How Mixtral Routes Each Token to Two Experts",
+        "voice_text": voice_text,
+        "beat_sheet": beat_sheet,
+        "shots": shots,
+        "broll_query": "GPU server racks, semiconductor processors, neural network routing",
+        "youtube_tags": ["Mixture of Experts", "Mixtral", "AI explained", "machine learning"],
+        "instagram_hashtags": ["#AI", "#MachineLearning", "#NEXTDECODE"],
+        "platform_copy": {
+            "youtube_description": "A focused explanation of Mixtral's token-by-token expert routing.",
+            "instagram_caption": "The key to a mixture-of-experts model is its routing rule.",
+            "facebook_title": "How Mixtral Routes Tokens to Experts",
+            "facebook_description": "A concise breakdown of sparse mixture-of-experts routing.",
+        },
+        "source_urls": list(dict.fromkeys(item["source_url"] for item in eligible)),
+        "word_count": len(re.findall(r"\S+", voice_text)),
+        "seconds": seconds,
+        "critic": {},
+        "hook_archetype": "mechanism_reveal",
+        "slop_score": 0.0,
+        "rewrites": 0,
+        "researched": True,
+        "topic": topic,
+    }
+    script["critic"] = critique(script, research=research, topic=topic)
+    if not script["critic"].get("pass"):
+        return None
+    return script
 
 def render_report(script: dict) -> str:
     lines = []

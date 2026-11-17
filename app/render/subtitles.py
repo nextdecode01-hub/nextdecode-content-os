@@ -155,7 +155,9 @@ def make_kinetic_ass(transcript_words: list[dict], out_path: Path, *,
         lines.append(current)
 
     margin_l = max(20, int(width * 0.05))
-    margin_v = max(40, int(height * SAFE_ZONE_BOTTOM))
+    # Keep captions in the lower phone-safe band.  The previous 18% bottom
+    # margin placed subtitles over the central content of full-screen diagrams.
+    margin_v = max(72, int(height * 0.055))
     margin_top = max(20, int(height * SAFE_ZONE_TOP))
 
     header = (

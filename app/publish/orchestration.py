@@ -27,7 +27,7 @@ SCRIPT_RANGES = {
     "standard_30s": (62, 78),
     "standard_35s": (72, 92),
     "deep_45s": (96, 118),
-    "deep_60s": (128, 150),
+    "deep_60s": (170, 210),
 }
 GENERIC_HOOK_PREFIXES = (
     "today we",

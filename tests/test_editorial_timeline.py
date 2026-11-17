@@ -38,6 +38,17 @@ def test_builds_frame_accurate_multitrack_timeline(tmp_path):
         music_path=music, sfx_timed=[(1.5, sfx)], ass_path=ass,
         motion_plan=[{"index": 1, "profile": "native"}],
         storyboard={"review_status": "auto_approved"},
+        edit_decisions={
+            "schema": "nextdecode.edl.v1", "duration_frames": 90,
+            "clips": [
+                {"shot_index": 0, "clip_id": "edl-0", "source": {"in_seconds": 2.0, "out_seconds": 3.5},
+                 "framing": {"mode": "contain"}, "transition_in": {"type": "fade", "duration_frames": 12},
+                 "transition_out": {"type": "cut", "duration_frames": 0}, "motion": {"mode": "native"}},
+                {"shot_index": 1, "clip_id": "edl-1", "source": {"in_seconds": 0.0, "out_seconds": 1.5},
+                 "framing": {"mode": "fill"}, "transition_in": {"type": "cut", "duration_frames": 0},
+                 "transition_out": {"type": "fade", "duration_frames": 12}, "motion": {}},
+            ],
+        },
     )
     assert timeline["schema"] == TIMELINE_SCHEMA
     assert timeline["timebase"] == {"fps_num": 30, "fps_den": 1, "drop_frame": False}
@@ -48,6 +59,12 @@ def test_builds_frame_accurate_multitrack_timeline(tmp_path):
     assert tracks["music"]["clips"][0]["end_frame"] == 90
     assert tracks["captions"]["clips"][0]["format"] == "ass"
     assert tracks["video"]["clips"][1]["director_motion"]["profile"] == "native"
+    assert tracks["video"]["clips"][0]["edl_clip_id"] == "edl-0"
+    assert tracks["video"]["clips"][0]["source_range"] == {"in_seconds": 2.0, "out_seconds": 3.5}
+    assert tracks["video"]["clips"][0]["framing"]["mode"] == "contain"
+    assert tracks["video"]["clips"][0]["transition_in"] == "fade"
+    assert tracks["video"]["clips"][0]["transition_in_detail"]["type"] == "fade"
+    assert timeline["edit_decisions"]["schema"] == "nextdecode.edl.v1"
 
 
 def test_rejects_gap_or_overlap_between_picture_clips(tmp_path):

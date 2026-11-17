@@ -46,3 +46,21 @@ def test_api_catalog_endpoint_returns_ranked_candidates():
     result = get_tool_catalog("browser-automation")
     assert result["candidates"][0]["id"] == "playwright"
     assert result["candidates"][1]["replacement_for"] == "playwright"
+
+
+def test_editorial_alternatives_are_candidates_not_implicitly_active():
+    renderers = rank_candidates("editorial-rendering")
+    assert [item["id"] for item in renderers] == ["ffmpeg", "gstreamer", "moviepy"]
+    assert renderers[0]["status"] == "active"
+    assert all(item["status"] == "candidate" for item in renderers[1:])
+    assert renderers[1]["replacement_for"] == "ffmpeg"
+    assert renderers[2]["replacement_for"] == "ffmpeg"
+
+    visual = rank_candidates("editorial-visual-analysis")
+    assert visual[0]["id"] == "opencv"
+    assert visual[0]["status"] == "candidate"
+
+    speech = rank_candidates("speech-synthesis")
+    assert speech[0]["id"] == "piper-tts"
+    assert speech[0]["status"] == "approval-required"
+    assert speech[0]["requires_approval"] is True

@@ -83,17 +83,26 @@ class RightsTests(unittest.TestCase):
 
 class SelectionTests(unittest.TestCase):
     def test_cutout_budget_is_balanced(self):
-        scene_claims = {index: [_claims()[0]] for index in range(10)}
+        permitted = dict(_claims()[0], publisher="nist.gov")
+        scene_claims = {index: [permitted] for index in range(10)}
         result = cutouts.select_cutout_scenes({}, scene_claims, max_ratio=0.3)
         self.assertLessEqual(len(result["selected"]), 3)
         self.assertGreaterEqual(len(result["selected"]), 1)
 
     def test_two_cutouts_never_sit_back_to_back(self):
-        scene_claims = {index: [_claims()[0]] for index in range(8)}
+        permitted = dict(_claims()[0], publisher="nist.gov")
+        scene_claims = {index: [permitted] for index in range(8)}
         result = cutouts.select_cutout_scenes({}, scene_claims, max_ratio=0.5)
         indices = [item["scene_index"] for item in result["selected"]]
         for left, right in zip(indices, indices[1:]):
             self.assertGreater(right - left, 1)
+
+    def test_unknown_reuse_rights_are_not_selected_for_source_cards(self):
+        result = cutouts.select_cutout_scenes(
+            {}, {0: [_claims()[0]], 1: [_claims()[0]]}
+        )
+        self.assertEqual(result["selected"], [])
+        self.assertEqual(result["skipped_unknown_rights"], ["clm_supported"])
 
     def test_weak_claims_are_not_selected(self):
         scene_claims = {index: [_claims()[1]] for index in range(6)}
@@ -185,11 +194,26 @@ class StoryboardEvidenceTests(unittest.TestCase):
         self.assertNotEqual(payload["review_status"], "auto_approved")
         self.assertTrue(any("weak evidence" in reason for reason in payload["review_reasons"]))
 
-    def test_duplicate_claim_across_scenes_is_flagged(self):
+    def test_duplicate_source_cutout_claim_across_scenes_is_flagged(self):
         claim = _claims()[0]
-        payload = self._build({"scene_claims": {0: [claim], 1: [claim]},
-                               "script_sha256": "s", "ledger_sha256": "l"})
-        self.assertTrue(any("already used by" in reason for reason in payload["review_reasons"]))
+        shots = _shots(3)
+        details = [_detail(index, _png(self.dir / f"dup{index}.png")) for index in range(3)]
+        cutout = {
+            "claim_id": claim["claim_id"],
+            "path": str(self.dir / "dup0.png"),
+            "reuse_rights": {"status": "unknown"},
+            "attribution_lines": ["wire.example.com"],
+        }
+        payload = storyboard.build_storyboard(
+            shots, details, self.dir / "work",
+            evidence={
+                "scene_claims": {0: [claim], 1: [claim]},
+                "cutouts": {0: cutout, 1: cutout},
+                "script_sha256": "s", "ledger_sha256": "l",
+            },
+        )
+        self.assertTrue(any("source cutout claim" in reason
+                            for reason in payload["review_reasons"]))
 
     def test_approval_is_invalidated_by_a_new_script_hash(self):
         payload = self._build({"scene_claims": {}, "script_sha256": "script-v1",

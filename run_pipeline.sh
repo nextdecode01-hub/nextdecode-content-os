@@ -22,6 +22,13 @@ else
     exit "$status"
 fi
 
+# A dry run creates a synthetic mechanics artifact, not a publishable review
+# package. Do not let the bundle command pick up and notify an older queued run.
+if [[ "${DRY_RUN:-}" =~ ^(1|true|yes)$ ]]; then
+    echo "[review] DRY_RUN=1: skipping review bundle and notifications."
+    exit 0
+fi
+
 "$PYTHON" -m app.review.review_bundle
 
 if [[ "${PUBLISH_MODE:-review}" != "publish" ]]; then

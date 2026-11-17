@@ -492,13 +492,28 @@ def claims_for_scene(ledger: dict, narration: str, *, threshold: float = 0.35) -
     tokens = evidence.content_tokens(narration)
     if not tokens:
         return []
-    ranked = []
-    for claim in ledger.get("claims") or []:
-        claim_tokens = evidence.content_tokens(claim.get("narration") or claim.get("quote") or "")
-        if not claim_tokens:
-            continue
-        overlap = len(tokens & claim_tokens) / max(1, len(tokens))
-        if overlap >= threshold:
-            ranked.append((overlap, claim))
-    ranked.sort(key=lambda item: -item[0])
+    all_claims = [claim for claim in ledger.get("claims") or [] if isinstance(claim, dict)]
+    eligible = [
+        claim for claim in all_claims
+        if str(claim.get("decision") or "") in {"include", "qualify"}
+        and str((claim.get("verification") or {}).get("status") or "")
+        in {"supported", "partially_supported"}
+    ]
+
+    def rank(candidates: list[dict]) -> list[tuple[float, dict]]:
+        ranked = []
+        for claim in candidates:
+            claim_tokens = evidence.content_tokens(claim.get("narration") or claim.get("quote") or "")
+            if not claim_tokens:
+                continue
+            overlap = len(tokens & claim_tokens) / max(1, len(tokens))
+            if overlap >= threshold:
+                ranked.append((overlap, claim))
+        ranked.sort(key=lambda item: -item[0])
+        return ranked
+
+    preferred = rank(eligible)
+    # Preserve a weak match only when no permitted evidence can support the
+    # scene; downstream gates then surface the missing/weak link explicitly.
+    ranked = preferred or rank(all_claims)
     return [claim for _, claim in ranked[:2]]

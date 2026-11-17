@@ -1,0 +1,170 @@
+{
+  "schema": "nextdecode.model-portfolio.v1",
+  "status": "qualification_in_progress",
+  "selection_policy": {
+    "target_count": 10,
+    "criteria": [
+      "live_success",
+      "production_task_quality",
+      "structured_output_reliability",
+      "latency",
+      "actual_token_efficiency",
+      "context_and_output_capacity",
+      "quota_visibility",
+      "rate_limit_headroom",
+      "provider_reliability"
+    ],
+    "automatic_selection": false,
+    "owner_approval_required": true
+  },
+  "candidates": [
+    {
+      "id": "groq:qwen/qwen3.8-27b",
+      "provider": "groq",
+      "model": "qwen/qwen3.8-27b",
+      "use_cases": [
+        "research synthesis",
+        "script drafting",
+        "general reasoning"
+      ],
+      "role": "balanced"
+    },
+    {
+      "id": "groq:openai/gpt-oss-20b",
+      "provider": "groq",
+      "model": "openai/gpt-oss-20b",
+      "use_cases": [
+        "fast structured extraction",
+        "classification",
+        "short scripts"
+      ],
+      "role": "fast"
+    },
+    {
+      "id": "groq:openai/gpt-oss-120b",
+      "provider": "groq",
+      "model": "openai/gpt-oss-120b",
+      "use_cases": [
+        "complex reasoning",
+        "script quality review",
+        "long-context synthesis"
+      ],
+      "role": "quality"
+    },
+    {
+      "id": "gemini:gemini-3.5-flash",
+      "provider": "gemini",
+      "model": "gemini-3.5-flash",
+      "use_cases": [
+        "research synthesis",
+        "multimodal planning",
+        "general generation"
+      ],
+      "role": "balanced"
+    },
+    {
+      "id": "gemini:gemini-flash-latest",
+      "provider": "gemini",
+      "model": "gemini-flash-latest",
+      "use_cases": [
+        "fast drafting",
+        "classification",
+        "summaries"
+      ],
+      "role": "fast"
+    },
+    {
+      "id": "gemini:gemini-3.5-flash-lite",
+      "provider": "gemini",
+      "model": "gemini-3.5-flash-lite",
+      "use_cases": [
+        "low-cost extraction",
+        "metadata",
+        "short transformations"
+      ],
+      "role": "efficient"
+    },
+    {
+      "id": "nvidia:nvidia/nemotron-3.5-bolt-e4b",
+      "provider": "nvidia",
+      "model": "nvidia/nemotron-3.5-bolt-e4b",
+      "use_cases": [
+        "fast structured extraction",
+        "research evidence classification",
+        "short metadata transformations"
+      ],
+      "role": "fast_extraction",
+      "selection_status": "provisional_candidate"
+    },
+    {
+      "id": "openrouter:recursive/flint-v1.0:free",
+      "provider": "openrouter",
+      "model": "recursive/flint-v1.0:free",
+      "use_cases": [
+        "free-tier fallback",
+        "general drafting"
+      ],
+      "role": "fallback"
+    },
+    {
+      "id": "cloudflare:@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+      "provider": "cloudflare",
+      "model": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+      "use_cases": [
+        "fast extraction",
+        "classification",
+        "short drafting"
+      ],
+      "role": "fast"
+    },
+    {
+      "id": "pollinations_text:openai",
+      "provider": "pollinations_text",
+      "model": "openai",
+      "use_cases": [
+        "best-effort fallback",
+        "short transformations"
+      ],
+      "role": "fallback"
+    },
+    {
+      "id": "nvidia:nvidia/nemotron-3.5-lightning-30b-a3b",
+      "provider": "nvidia",
+      "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+      "use_cases": [
+        "long-form script drafting",
+        "complex synthesis",
+        "higher-effort reasoning"
+      ],
+      "role": "quality_candidate",
+      "selection_status": "provisional_candidate"
+    },
+    {
+      "id": "nvidia:nvidia/nemotron-3.5-super-vl-120b-a12b",
+      "provider": "nvidia",
+      "model": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+      "use_cases": [
+        "visual quality assurance",
+        "contact-sheet understanding",
+        "sampled video-frame analysis",
+        "image/document understanding"
+      ],
+      "role": "visual_qa",
+      "selection_status": "provisional_candidate"
+    }
+  ],
+  "candidate_pool_count": 12,
+  "candidate_roster_approval": {
+    "status": "owner_approved_candidate_roster",
+    "approved_date": "2026-11-16",
+    "scope": "Approve the current ten routed candidate roster and retain the two existing reserves as candidates for qualification.",
+    "qualification_status": "not_production_qualified",
+    "constraints": [
+      "No automatic role promotion.",
+      "No paid provider calls or budget increase.",
+      "Unqualified models must not be routed automatically.",
+      "Visual QA remains blocked until project contact-sheet and sampled-frame qualification passes.",
+      "Human approval remains required before publishing."
+    ]
+  }
+}

@@ -1,3 +1,4 @@
+import os
 import unittest
 from unittest.mock import patch
 
@@ -76,7 +77,10 @@ class DeskSourceTests(unittest.TestCase):
             result = desk.research_topic("AI data centers and electricity demand")
 
         self.assertEqual([source["url"] for source in result["sources"]], [page["url"]])
-        self.assertEqual(result["verdict"], "sufficient")
+        # One reporting source is useful discovery, but not enough evidence
+        # for a strong production script.
+        self.assertEqual(result["verdict"], "insufficient")
+        self.assertEqual(result["source_quality"]["editorial_source_count"], 1)
 
     def test_research_reports_insufficient_when_search_finds_nothing(self):
         with patch.object(topics, "search_web", return_value=[]):
@@ -128,7 +132,12 @@ class VisualReliabilityTests(unittest.TestCase):
 
     def test_chain_skips_unconfigured_providers_but_keeps_keyless_pollinations(self):
         visual_assets._PROVIDER_COOLDOWN.clear()
-        with patch.object(visual_assets, "FAL_KEY", ""), patch.object(visual_assets, "REPLICATE_TOKEN", ""), patch.object(
+        # The free-only policy deliberately excludes pollinations (it returned
+        # HTTP 402 without a token); this test covers the chain when that
+        # fallback policy is not in force.
+        with patch.dict(os.environ, {"NEXTDECODE_FREE_VISUALS_ONLY": ""}, clear=False), patch.object(
+            visual_assets, "FAL_KEY", ""
+        ), patch.object(visual_assets, "REPLICATE_TOKEN", ""), patch.object(
             visual_assets, "OPENAI_KEY", ""
         ):
             chain = visual_assets._chain()

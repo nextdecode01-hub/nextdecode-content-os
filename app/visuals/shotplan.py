@@ -14,10 +14,11 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import replace
 from pathlib import Path
 
 from app.visuals import beats as beat_module
-from app.visuals import chain, motion_director
+from app.visuals import chain, creative_director, motion_director
 
 SHOTPLAN_VERSION = 1
 EVIDENCE_REQUIRED_STATUSES = frozenset({"supported", "partially_supported"})
@@ -32,26 +33,35 @@ def _normalise(value: object) -> str:
     return " ".join(re.findall(r"[a-z0-9]+", _text(value).lower()))
 
 
-def _beat_index_for_shot(shot: dict, shot_beats: list[beat_module.NarrationBeat],
-                         position: int, shot_count: int) -> int:
-    """Bind a shot to its narration beat.
+def _beat_indices_for_shot(shot: dict, shot_beats: list[beat_module.NarrationBeat],
+                           position: int, shot_count: int) -> list[int]:
+    """Bind a shot to every narration beat it actually contains.
 
-    An exact (or contained) text match wins because the script stage usually
-    copies the beat text into the shot.  Otherwise the shot is placed
-    proportionally, which keeps order and guarantees coverage.
+    The script planner intentionally merges adjacent short beats to respect its
+    shot-count ceiling. Treating the merged shot as belonging only to its first
+    sentence created false uncovered-beat flags and lost traceability.
     """
     if not shot_beats:
-        return 0
+        return []
     shot_text = _normalise(shot.get("claim") or shot.get("caption") or shot.get("visual"))
     if shot_text:
-        for beat in shot_beats:
-            if _normalise(beat.text) == shot_text:
-                return beat.index
-        for beat in shot_beats:
-            beat_text = _normalise(beat.text)
-            if beat_text and (shot_text in beat_text or beat_text in shot_text):
-                return beat.index
-    return min(len(shot_beats) - 1, int(position * len(shot_beats) / max(1, shot_count)))
+        exact = [beat.index for beat in shot_beats if _normalise(beat.text) == shot_text]
+        if exact:
+            return exact
+        contained = [
+            beat.index for beat in shot_beats
+            if (beat_text := _normalise(beat.text)) and beat_text in shot_text
+        ]
+        if contained:
+            return contained
+        partial = [
+            beat.index for beat in shot_beats
+            if (beat_text := _normalise(beat.text))
+            and (shot_text in beat_text or beat_text in shot_text)
+        ]
+        if partial:
+            return partial
+    return [min(len(shot_beats) - 1, int(position * len(shot_beats) / max(1, shot_count)))]
 
 
 def _ledger_claims(ledger: dict | None) -> dict[str, dict]:
@@ -86,22 +96,39 @@ def _evidence_for(beat: beat_module.NarrationBeat, shots: list[dict],
     for claim_id in list(explicit_claim_ids or []) + [
             cid for shot in shots for cid in shot.get("claim_ids") or []]:
         claim_id = str(claim_id)
-        if claim_id and claim_id not in explicit:
+        claim = known_claim_ids.get(claim_id) or {}
+        status = str((claim.get("verification") or {}).get("status") or "unverified")
+        decision = str(claim.get("decision") or "")
+        # Stale/contradictory explicit references are not allowed to override
+        # a valid scene match. They remain visible only when no eligible claim
+        # can support the beat.
+        if (
+            claim_id
+            and claim_id in known_claim_ids
+            and status in EVIDENCE_REQUIRED_STATUSES
+            and decision in {"include", "qualify"}
+            and claim_id not in explicit
+        ):
             explicit.append(claim_id)
 
     flags: list[str] = []
-    invalid_references = [claim_id for claim_id in explicit if claim_id not in known_claim_ids]
+    invalid_references = [
+        str(claim_id) for claim_id in list(explicit_claim_ids or [])
+        if str(claim_id) and str(claim_id) not in known_claim_ids
+    ]
     if explicit:
-        claim_ids = explicit
+        claim_ids = list(dict.fromkeys(explicit + claim_ids))
         statuses = {
             claim_id: str(
                 (known_claim_ids.get(claim_id, {}).get("verification") or {}).get("status")
                 or "unverified"
             )
-            for claim_id in explicit if claim_id in known_claim_ids
+            for claim_id in claim_ids if claim_id in known_claim_ids
         }
         if invalid_references:
             flags.append("evidence_reference_invalid")
+    elif invalid_references:
+        flags.append("evidence_reference_invalid")
 
     if ledger is None or not isinstance(ledger, dict):
         flags.append("evidence_ledger_absent")
@@ -121,6 +148,71 @@ def _evidence_for(beat: beat_module.NarrationBeat, shots: list[dict],
     }
 
 
+def _moe_visual_queries(topic: str, narration: str) -> list[str]:
+    """Return intent-specific searches for MoE beats, never topic-wide repeats."""
+    topic_text = str(topic or "").lower()
+    text = str(narration or "").lower()
+    domain_text = f"{topic_text} {text}"
+    if not re.search(r"\b(?:mixture of experts|moe|mixtral|few experts)\b", domain_text):
+        return []
+
+    if any(term in text for term in ("memory", "stored", "store all", "inactive parameter", "weights occupy")):
+        return [
+            "GPU memory modules close up",
+            "graphics card VRAM memory chips",
+            "AI server memory modules",
+        ]
+    if any(term in text for term in ("dormant", "inactive experts", "stay idle", "not selected")):
+        return [
+            "GPU server cluster idle accelerator cards",
+            "GPU accelerator cards close up",
+            "data center server rack close up",
+        ]
+    if any(term in text for term in ("communication", "interconnect", "overhead", "between gpus")):
+        return [
+            "GPU cluster interconnect cables",
+            "data center high speed network switches",
+            "GPU server rack networking",
+        ]
+    if any(term in text for term in ("company", "specialist team", "library of specialists", "office", "analogy")):
+        return [
+            "office team collaboration meeting",
+            "warehouse order sorting conveyor workers",
+            "dispatch team assigning incoming tasks",
+        ]
+    if "sparse" in text or "selected subset" in text:
+        return [
+            "sparse expert network router flowchart",
+            "GPU accelerator cards close up",
+            "graphics card VRAM memory chips",
+            "AI server rack close up",
+        ]
+    if any(term in text for term in ("router", "gating", "routes", "routing", "token-by-token")):
+        return [
+            "mixture of experts token routing diagram",
+            "GPU server racks data center",
+            "AI server room cinematic footage",
+            "GPU cluster network switches",
+            "multiple processor cores on circuit board",
+        ]
+    if any(term in text for term in ("expert", "experts", "selected", "subset", "pool", "specialist networks")):
+        return [
+            "parallel computer processing nodes server cluster",
+            "multiple processor cores on circuit board",
+            "data center computing racks wide shot",
+        ]
+    if any(term in text for term in ("mixtral", "parameter", "compute", "model", "open weights")):
+        return [
+            "GPU server racks data center",
+            "AI compute server cluster",
+            "computer processor chips close up",
+        ]
+    return [
+        "AI data center server racks",
+        "GPU compute cluster",
+        "artificial intelligence hardware",
+    ]
+
 def _duration_basis(total_duration: float, audio_duration: float | None) -> str:
     if not audio_duration:
         return f"planned:{round(total_duration, 3)}s"
@@ -137,6 +229,9 @@ def plan_shot_plan(script: dict, *, ledger: dict | None = None,
     """
     script = dict(script or {})
     shots = motion_director.plan_shots(script, audio_duration=audio_duration)
+    topic = _text(script.get("topic") or script.get("title"))
+    for shot in shots:
+        shot.setdefault("topic", topic)
     narration = _text(script.get("voice_text") or script.get("text"))
     if not narration:
         narration = " ".join(
@@ -144,6 +239,40 @@ def plan_shot_plan(script: dict, *, ledger: dict | None = None,
             for shot in shots
         )
     shot_beats = beat_module.analyse_narration(narration)
+    # Carry the creator's editorial direction into the evidence/shot planner.
+    # Previously this second parser discarded the director's chosen subject,
+    # action, visual family and asset query, producing empty actions and repeated
+    # generic searches even though the script already contained that direction.
+    directed_beats = creative_director.direct_shots(
+        list(script.get("beat_sheet") or []),
+        topic=topic,
+        story_format=str(script.get("story_format") or "auto"),
+        visual_style=str(script.get("visual_style") or "auto"),
+    )
+    creative_beats = {
+        int(item.get("index", position)): item
+        for position, item in enumerate(directed_beats)
+        if isinstance(item, dict)
+    }
+    enriched_beats = []
+    for beat in shot_beats:
+        creative = creative_beats.get(beat.index) or {}
+        visual_action = _text(creative.get("visual_action") or creative.get("action"))
+        visual_subject = _text(creative.get("visual_subject") or creative.get("subject"))
+        action = beat.action or visual_action
+        subject = visual_subject or beat.subject
+        flags = tuple(
+            flag for flag in beat.flags
+            if not (flag == "no_action" and action)
+            and not (flag == "no_subject" and subject)
+        )
+        enriched_beats.append(replace(
+            beat, subject=subject, action=action,
+            context=_text(creative.get("visual_context") or creative.get("context")) or beat.context,
+            emotion=_text(creative.get("emotion")) or beat.emotion,
+            flags=flags,
+        ))
+    shot_beats = enriched_beats
     known_claim_ids = _ledger_claims(ledger)
     # plan_shots() rebuilds shot dicts, so an explicit reference is read from the
     # script's own shots and matched to its beat by text.
@@ -161,8 +290,9 @@ def plan_shot_plan(script: dict, *, ledger: dict | None = None,
     for position, shot in enumerate(shots):
         if not shot_beats:
             break
-        index = _beat_index_for_shot(shot, shot_beats, position, len(shots))
-        assigned.setdefault(index, []).append(shot)
+        indices = _beat_indices_for_shot(shot, shot_beats, position, len(shots))
+        for index in indices:
+            assigned.setdefault(index, []).append(shot)
 
     entries: list[dict] = []
     evidence_missing: list[str] = []
@@ -171,7 +301,52 @@ def plan_shot_plan(script: dict, *, ledger: dict | None = None,
     for beat in shot_beats:
         beat_shots = assigned.get(beat.index, [])
         primary = beat_shots[0] if beat_shots else None
-        brief = chain.build_scene_brief(primary, index=beat.index) if primary else {}
+        if primary:
+            # Classify from the actual narration sentence, not the planner's
+            # shortened search caption. The latter can be generic ("Mixtral",
+            # "sparse expert network") and was incorrectly turning mechanism
+            # beats into b-roll even when the narration explicitly described
+            # routing, token selection, or specialist networks.
+            classification_shot = dict(primary)
+            classification_shot["claim"] = beat.text
+            classification_shot["caption"] = beat.text
+            classification_shot["narration"] = beat.text
+            classification_shot["beat_subject"] = beat.subject
+            classification_shot["beat_subject_type"] = beat.subject_type
+            classification_shot["beat_action"] = beat.action
+            classification_shot["beat_context"] = beat.context
+            classification_shot["beat_emotion"] = beat.emotion
+            brief = chain.build_scene_brief(classification_shot, index=beat.index)
+        else:
+            brief = {}
+        creative = creative_beats.get(beat.index) or {}
+        # The creative director's beat-specific semantic search is authoritative;
+        # narration-derived classifier queries remain fallbacks, not replacements.
+        creative_query = _text(creative.get("asset_query"))
+        creative_variants = [
+            _text(value) for value in creative.get("asset_query_variants") or []
+            if _text(value)
+        ]
+        if creative_query:
+            brief["search_query"] = creative_query
+            brief["queries"] = list(dict.fromkeys([creative_query, *creative_variants]))
+        visual_family = str(creative.get("visual_family") or "").lower()
+        family_types = {
+            "real_footage": ("broll", "footage"),
+            "diagram": ("motion_graphic", "diagram"),
+            "chart": ("motion_graphic", "chart"),
+            "typography": ("motion_graphic", "typography"),
+            "screen_recording": ("screen_recording", "interface"),
+            "product_demo": ("screen_recording", "interface"),
+        }
+        if visual_family in family_types:
+            brief["visual_type"], brief["scene_type"] = family_types[visual_family]
+        if creative.get("editorial_reason"):
+            brief["visual_purpose"] = _text(creative["editorial_reason"])
+        visual_queries = _moe_visual_queries(topic, beat.text)
+        if visual_queries and not creative_query:
+            brief["search_query"] = visual_queries[0]
+            brief["queries"] = list(visual_queries)
         evidence = _evidence_for(
             beat, beat_shots, ledger, known_claim_ids,
             explicit_refs.get(_normalise(beat.text), []),
@@ -211,6 +386,9 @@ def plan_shot_plan(script: dict, *, ledger: dict | None = None,
             "context": beat.context,
             "emotion": beat.emotion,
             "visual_objective": brief.get("visual_purpose") or "",
+            "visual_subject": beat.subject,
+            "visual_action": beat.action,
+            "visual_context": beat.context,
             "visual_type": brief.get("visual_type") or "",
             "scene_type": brief.get("scene_type") or "",
             "expected_duration": total_duration,
@@ -290,7 +468,36 @@ def annotate_shots(shots: list[dict], plan: dict) -> list[dict]:
         evidence = entry.get("evidence") or {}
         item["shot_id"] = f"s{index:02d}"
         item["shot_plan_ref"] = str(entry.get("shot_id") or "")
+        search = entry.get("search") or {}
+        search_variants = [str(value) for value in search.get("variants") or [] if str(value).strip()]
+        if search.get("primary"):
+            planned_primary = str(search["primary"]).strip()
+            creator_primary = str(item.get("asset_query") or "").strip()
+            refs = list(entry.get("shots") or [])
+            ref_position = next(
+                (i for i, ref in enumerate(refs)
+                 if int(ref.get("shot_index", -1)) == index),
+                0,
+            )
+            concise_variants = [
+                value for value in search_variants
+                if value and len(value.split()) <= 7
+            ]
+            query_pool = list(dict.fromkeys([planned_primary, *concise_variants]))
+            selected_query = query_pool[ref_position % len(query_pool)] if query_pool else planned_primary
+            # Preserve beat-level creative intent while varying repeated coverage
+            # shots so the same visual search is not downloaded for every cut.
+            if not creator_primary or len(creator_primary.split()) > 7:
+                creator_primary = planned_primary
+            item["asset_query"] = selected_query or creator_primary
+            item["asset_query_variants"] = query_pool or [creator_primary]
+        item["visual_subject"] = str(entry.get("visual_subject") or "")
+        item["visual_action"] = str(entry.get("visual_action") or "")
+        item["visual_context"] = str(entry.get("visual_context") or "")
         item["narration_ref"] = dict(entry.get("narration_ref") or {})
+        narration_text = str(item["narration_ref"].get("text") or "").strip()
+        if narration_text:
+            item["narration"] = narration_text
         item["subject"] = str((entry.get("subject") or {}).get("name") or "")
         item["evidence_claim_ids"] = [str(cid) for cid in evidence.get("claim_ids") or []]
         item["evidence_flags"] = [str(flag) for flag in evidence.get("flags") or []]

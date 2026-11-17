@@ -49,6 +49,14 @@ _ACTION_VERBS = (
     "uses", "use", "runs", "run", "builds", "built", "trains", "trained",
     "evaluates", "measures", "misses", "catches", "fails", "failing",
     "replaces", "replaced", "supports", "enables", "prevents", "protects",
+    "selects", "selected", "chooses", "chosen", "arrives", "reaches",
+    "routes", "routed", "is routed", "are routed", "gets routed",
+    "activates", "activated", "combines", "returns", "enters", "passes",
+    "flows", "flows through", "sends", "sent", "receives", "received",
+    "dispatches", "dispatch", "divides", "splits", "separates",
+    "fires", "fires up", "aggregates", "merges", "rejoins", "reconnects",
+    "selecting", "routing", "processing", "computes", "computing",
+    "proposes", "designed", "accelerates", "generates", "refines", "describes",
 )
 
 _CONTEXT_PREPOSITIONS = (
@@ -186,6 +194,9 @@ def _emotion(text: str) -> str:
 
 def _requires_evidence(text: str, subject_type: str, action: str) -> bool:
     low = text.lower()
+    # A hook/question frames an inquiry rather than asserting its answer.
+    if text.rstrip().endswith("?"):
+        return False
     if _NUMBER_RE.search(text):
         return True
     if any(month in low for month in _MONTHS):

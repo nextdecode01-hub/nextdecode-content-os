@@ -124,6 +124,42 @@ class KenBurnsFilterTests(unittest.TestCase):
         self.assertIn("crop=1080:1920", f)
         self.assertNotIn("zoompan", f)
 
+    def test_edl_contain_framing_and_edge_fades_are_executable(self):
+        shot = {
+            "duration": 2.0,
+            "framing": {"mode": "contain", "focal_x": 0.7, "focal_y": 0.3},
+            "edl_transition": {"in": True, "out": False, "duration_frames": 12},
+        }
+        f = motion_render.build_ken_burns_filter(shot)
+        self.assertIn("force_original_aspect_ratio=decrease", f)
+        self.assertIn("pad=1080:1920", f)
+        self.assertIn("fade=t=in:st=0", f)
+
+    def test_native_framing_and_edge_fades_pass_ffmpeg_validation(self):
+        if not HAS_FFMPEG:
+            self.skipTest("ffmpeg not available")
+        shot = {
+            "duration": 1.0,
+            "motion": {"mode": "native", "zoom_from": 1.02},
+            "framing": {"mode": "fill", "focal_x": 0.8, "focal_y": 0.25},
+            "edl_transition": {"in": True, "out": True, "duration_frames": 6},
+        }
+        filter_str = motion_render.build_ken_burns_filter(shot, width=360, height=640)
+        cmd = [FFMPEG, "-y", "-f", "lavfi", "-i", "color=c=red:s=640x360:r=30:d=1",
+               "-vf", filter_str, "-frames:v", "30", "-f", "null", "-"]
+        completed = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        self.assertEqual(completed.returncode, 0, completed.stderr[-500:])
+
+    def test_native_crop_uses_focal_point(self):
+        shot = {
+            "duration": 2.0,
+            "motion": {"mode": "native", "zoom_from": 1.0},
+            "framing": {"mode": "fill", "focal_x": 0.8, "focal_y": 0.25},
+        }
+        f = motion_render.build_ken_burns_filter(shot)
+        self.assertIn("(iw-1080)*0.8", f)
+        self.assertIn("(ih-1920)*0.25", f)
+
     def test_filter_passes_ffmpeg_validation(self):
         if not HAS_FFMPEG:
             self.skipTest("ffmpeg not available")
@@ -287,7 +323,7 @@ class IntegrationRenderTests(unittest.TestCase):
             out = td / "out.mp4"
             # Test-only gate: this case covers render mechanics (motion, dimensions,
             # audio).  Production keeps STORYBOARD_GATE=require.
-            with patch.dict(os.environ, {"STORYBOARD_GATE": "warn"}), \
+            with patch.dict(os.environ, {"DRY_RUN": "1", "STORYBOARD_GATE": "warn"}), \
                     patch("app.visuals.stock_fetcher.fetch_shot_image", return_value=None):
                 # This test validates rendering mechanics, not live Wikimedia
                 # availability; keep the integration render hermetic.
@@ -303,9 +339,107 @@ class IntegrationRenderTests(unittest.TestCase):
             has_audio = any(s.get("codec_type") == "audio" for s in data.get("streams", []))
             self.assertTrue(has_audio)
             self.assertEqual(result["status"], "ok")
+            self.assertTrue((td / "editorial_handoff.otio").is_file())
             self.assertEqual(result["width"], 1080)
             self.assertEqual(result["height"], 1920)
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CreativeDirectionTests(unittest.TestCase):
+    def test_story_formats_and_visual_styles_change_executable_shot_briefs(self):
+        beats = [
+            {"text": "A new AI lab opened", "label": "hook", "visual": "research lab"},
+            {"text": "The system evaluates hypotheses", "label": "mechanism", "visual": "AI research system"},
+            {"text": "The experiment failed", "label": "evidence", "visual": "research paper"},
+            {"text": "The lesson is clear", "label": "payoff", "visual": "scientist"},
+        ]
+        documentary = motion_director.plan_shots(
+            {"topic": "AI research", "story_format": "mini_documentary",
+             "visual_style": "documentary", "beat_sheet": beats}, audio_duration=12.0)
+        cinematic = motion_director.plan_shots(
+            {"topic": "AI research", "story_format": "mystery_reveal",
+             "visual_style": "cinematic", "beat_sheet": beats}, audio_duration=12.0)
+        self.assertEqual(documentary[0]["story_format"], "mini_documentary")
+        self.assertEqual(documentary[0]["visual_style"], "documentary")
+        self.assertEqual(cinematic[0]["story_format"], "mystery_reveal")
+        self.assertNotEqual(documentary[0]["lighting_direction"], cinematic[0]["lighting_direction"])
+        self.assertIn(documentary[0]["shot_size"], {"close_up", "wide", "medium", "insert"})
+        self.assertTrue(documentary[0]["camera_angle"])
+        self.assertTrue(documentary[0]["camera_movement"])
+        self.assertTrue(documentary[0]["asset_query_variants"])
+        self.assertTrue(all(len(q.split()) <= 7 for q in documentary[0]["asset_query_variants"]))
+        self.assertEqual(documentary[0]["transition"], "fade")
+        self.assertTrue(documentary[1]["transition_intent"])
+        self.assertTrue(documentary[1]["editorial_reason"])
+
+
+class CreativeFormatSelectionTests(unittest.TestCase):
+    def test_auto_story_format_selection_uses_topic_and_narrative_signals(self):
+        self.assertEqual(motion_director.creative_director.select_story_format("The history of AI", []), "timeline")
+        self.assertEqual(motion_director.creative_director.select_story_format("Is this AI myth actually true?", []), "myth_bust")
+        self.assertEqual(motion_director.creative_director.select_story_format("AI research experiment", []), "mini_documentary")
+        self.assertEqual(motion_director.creative_director.select_visual_style("AI research", "mini_documentary"), "documentary")
+
+class ExecutableTransitionTests(unittest.TestCase):
+    def test_transition_graph_contains_editorial_transitions_and_duration_compensation(self):
+        from app.render.ffmpeg_tools import build_editorial_concat_filter
+        graph, overlap = build_editorial_concat_filter([
+            {"duration": 2.0, "transition_intent": "cut"},
+            {"duration": 2.0, "transition_intent": "dissolve"},
+            {"duration": 2.0, "transition_intent": "whip_pan"},
+        ])
+        self.assertIn("xfade=transition=dissolve", graph)
+        self.assertIn("xfade=transition=smoothleft", graph)
+        self.assertIn("tpad=stop_mode=clone", graph)
+        self.assertGreater(overlap, 0.5)
+
+    def test_ffmpeg_executes_dissolve_and_whip_pan_without_shortening_master_timeline(self):
+        if not HAS_FFMPEG:
+            self.skipTest("ffmpeg not available")
+        from app.render.ffmpeg_tools import _concat_videos
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            clips = []
+            for index, colour in enumerate(("red", "blue", "green")):
+                path = root / f"clip_{index}.mp4"
+                subprocess.run([
+                    FFMPEG, "-y", "-f", "lavfi", "-i",
+                    f"color=c={colour}:s=360x640:r=30:d=2",
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", str(path),
+                ], check=True, capture_output=True)
+                clips.append(path)
+            shots = [
+                {"duration": 2.0, "transition_intent": "cut"},
+                {"duration": 2.0, "transition_intent": "dissolve"},
+                {"duration": 2.0, "transition_intent": "whip_pan"},
+            ]
+            output = _concat_videos(clips, shots, root)
+            info = _ffprobe_json(output)
+            self.assertAlmostEqual(float(info["format"]["duration"]), 6.0, delta=0.08)
+
+
+class SemanticCreativeExecutionTests(unittest.TestCase):
+    def test_semantic_asset_queries_are_concise_and_topic_relevant(self):
+        from app.visuals.creative_director import direct_shots
+        result = direct_shots(
+            [{"text": "An agent takes on an open-ended research question from an unpublished paper."}],
+            topic="Can AI agents conduct open-ended AI research?",
+            story_format="mini_documentary", visual_style="documentary",
+        )[0]
+        self.assertLessEqual(len(result["asset_query"].split()), 6)
+        self.assertEqual(result["asset_query_variants"][0], result["asset_query"])
+        self.assertIn("research", result["asset_query"])
+        self.assertTrue(any(token in result["asset_query"] for token in ("scientists", "agent", "paper")))
+
+    def test_camera_movement_drives_ken_burns_execution(self):
+        from app.visuals.motion_director import assign_motion
+        push = [{"index": 0, "duration": 2.0, "camera_movement": "slow_push_in"}]
+        pull = [{"index": 0, "duration": 2.0, "camera_movement": "slow_pull_back"}]
+        push_motion = assign_motion(push, [{"scene_type": "footage", "asset_kind": "image"}])[0]
+        pull_motion = assign_motion(pull, [{"scene_type": "footage", "asset_kind": "image"}])[0]
+        self.assertGreaterEqual(push_motion["zoom_to"], 1.10)
+        self.assertGreaterEqual(pull_motion["zoom_from"], 1.10)
+        self.assertEqual(pull_motion["zoom_to"], 1.0)

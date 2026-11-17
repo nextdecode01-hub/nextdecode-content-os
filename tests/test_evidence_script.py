@@ -45,6 +45,25 @@ class MappingTests(unittest.TestCase):
         self.assertEqual(result["sentences"][0]["claim_ids"], [])
         self.assertTrue(result["sentences"][0]["factual"] is False)
 
+    def test_source_attribution_is_factual_even_without_a_number(self):
+        result = evidence.map_sentences(
+            "The paper said it matched OpenAI o1 on most benchmarks.", CLAIMS
+        )
+        row = result["sentences"][0]
+        self.assertTrue(row["factual"])
+        self.assertIn(row["sentence"], result["unmapped"])
+
+    def test_named_product_capability_and_workflow_actions_are_factual(self):
+        sentences = [
+            "Google DeepMind's Co-Scientist is designed to help scientists generate hypotheses.",
+            "Its multi-agent workflow proposes ideas and ranks promising directions.",
+            "Nature has described research assistants as tools for hypothesis generation.",
+            "AI can accelerate parts of research through literature search.",
+        ]
+        for sentence in sentences:
+            with self.subTest(sentence=sentence):
+                self.assertTrue(evidence.looks_factual(sentence))
+
     def test_factual_sentence_without_claim_is_reported(self):
         result = evidence.map_sentences(
             "A separate survey found that 71% of teams changed tools last year.", CLAIMS
@@ -86,6 +105,20 @@ class ProportionalityTests(unittest.TestCase):
         flags = [flag["flag"] for flag in result["flags"]]
         self.assertIn("number_not_in_evidence", flags)
 
+    def test_unqualified_partially_supported_claim_is_flagged(self):
+        claims = [_claim(
+            "clm_partial", "Acme's tool costs less than the alternative.",
+            "Acme reported lower costs in one internal benchmark.",
+            status="partially_supported",
+        )]
+        result = evidence.map_sentences(
+            "Acme's tool costs less than the alternative.", claims
+        )
+        self.assertIn(
+            "unqualified_partially_supported",
+            [flag["flag"] for flag in result["flags"]],
+        )
+
     def test_unqualified_unverified_claim_is_flagged(self):
         claims = [_claim("clm_cccccccccc", "Acme raised $50 million in funding.",
                          "Acme raised $50 million in funding.", kind="funding", status="unverified")]
@@ -114,3 +147,16 @@ class CoverageTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+def test_mapping_matches_paraphrased_numeric_claim_at_safe_threshold():
+    claim = _claim(
+        "clm_map139",
+        "In practical terms, storing the 139GB world map with replication to most continents (5x) will run you about $5/month in storage fees.",
+        "In practical terms, storing the 139GB world map with replication to most continents (5x) will run you about $5/month in storage fees.",
+        status="partially_supported",
+    )
+    result = evidence.map_sentences(
+        "The whole world vector set is about 139 GB; replicating it to five edge nodes costs roughly $5 a month in storage.",
+        [claim],
+    )
+    assert result["sentences"][0]["claim_ids"] == ["clm_map139"]

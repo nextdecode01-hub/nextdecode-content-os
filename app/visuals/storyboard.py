@@ -28,7 +28,8 @@ APPROVED_STATUSES = {"auto_approved"}
 PROVIDER_SHORT = {
     "motion_graphic": "CARD",
     "pixabay": "PIX",
-    "pexels": "PEX",
+    "coverr": "CVR",
+    "openverse": "OV",
     "wikimedia": "WIKI",
     "pollinations": "AI",
     "gemini": "AI",
@@ -274,6 +275,8 @@ def _review_reasons(scene: dict, detail: dict, path: Path | None) -> list[str]:
         reasons.append("procedural source")
     if provider == "gradient":
         reasons.append("gradient caption fallback")
+    if provider in {"pixabay", "coverr", "wikimedia", "openverse", "ai_image"} and not (detail.get("vision_review") or {}).get("checked"):
+        reasons.append("external visual has not received a successful visual review")
     if detail.get("fallback_reason"):
         reasons.append(f"fallback: {detail['fallback_reason']}")
     if detail.get("visual_quality") == "low_light":
@@ -285,8 +288,11 @@ def _review_reasons(scene: dict, detail: dict, path: Path | None) -> list[str]:
         reasons.append(str(detail.get("review_reason") or "lexical match needs visual review"))
     if detail.get("vision_review", {}).get("checked"):
         verdict = str(detail["vision_review"].get("relevance") or "")
+        quality = str(detail["vision_review"].get("quality") or "unknown")
         if verdict and verdict != "high":
-            reasons.append(f"vision review: {verdict}")
+            reasons.append(f"vision review: {verdict} relevance")
+        if quality == "low":
+            reasons.append("vision review: low visual quality")
     return reasons
 
 
@@ -348,6 +354,10 @@ def build_storyboard(shots: list[dict], details: list[dict], work_dir: Path, *,
         if not thumb_ok:
             thumb_ok = bool(_blank_thumb(thumb_path))
         reasons = _review_reasons(scene, detail, asset_path)
+        plan_flags = [str(flag) for flag in shot.get("evidence_flags") or []]
+        for flag in plan_flags:
+            if flag not in {"no_action"}:
+                reasons.append(f"shot-plan integrity: {flag}")
         scene_claim_list = [claim for claim in (scene_claims.get(index) or []) if claim]
         cutout = cutouts.get(index) or {}
         claim_ids = [str(claim.get("claim_id") or "") for claim in scene_claim_list]
@@ -392,6 +402,7 @@ def build_storyboard(shots: list[dict], details: list[dict], work_dir: Path, *,
             "duration": round(float(shot.get("duration", 0.0) or 0.0), 3),
             "narration": str(scene.get("narration") or shot.get("claim") or shot.get("caption") or ""),
             "visual_purpose": str(scene.get("visual_purpose") or ""),
+            "visual_intent": str(scene.get("visual_intent") or scene.get("visual_purpose") or ""),
             "visual_type": str(detail.get("visual_type") or scene.get("visual_type") or ""),
             "scene_type": str(detail.get("scene_type") or scene.get("scene_type") or ""),
             "provider": provider,
@@ -399,6 +410,12 @@ def build_storyboard(shots: list[dict], details: list[dict], work_dir: Path, *,
             "card_variant": str(detail.get("card_variant") or scene.get("card_variant") or ""),
             "query": str(detail.get("query") or detail.get("keyword") or ""),
             "asset_path": str(asset_path) if asset_path else "",
+            "title": str(detail.get("title") or ""),
+            "description": str(detail.get("description") or ""),
+            "tags": str(detail.get("tags") or ""),
+            "author": str(detail.get("author") or ""),
+            "source_url": str(detail.get("source_url") or detail.get("page_url") or ""),
+            "object_name": str(detail.get("object_name") or ""),
             "relevance": str(detail.get("relevance") or ""),
             "relevance_confidence": confidence,
             "semantic_review": bool(detail.get("semantic_review")),
@@ -423,6 +440,7 @@ def build_storyboard(shots: list[dict], details: list[dict], work_dir: Path, *,
                 "query": str(detail.get("query") or ""),
                 "content_sha256": _sha256(asset_path) if asset_path else "",
                 "retrieved_at": _file_time(asset_path) if asset_path else "",
+                "generated_video": dict(detail.get("generated_provenance") or {}),
             },
         }
         records.append(record)
@@ -436,15 +454,20 @@ def build_storyboard(shots: list[dict], details: list[dict], work_dir: Path, *,
 
     # The same excerpt may not carry two scenes: repeating a quote is not emphasis,
     # it is padding, and it usually means the second scene lost its own evidence.
-    seen_claims: dict[str, str] = {}
+    # Reusing a research claim as supporting evidence across scenes is valid.
+    # The restriction applies to repeated source-card excerpts, not evidence links.
+    seen_cutout_claims: dict[str, str] = {}
     for record in records:
+        if not record.get("evidence_visual"):
+            continue
         for claim_id in record.get("claim_ids") or []:
-            if claim_id in seen_claims:
+            if claim_id in seen_cutout_claims:
                 all_reasons.append(
-                    f"{record['scene_id']}: claim {claim_id} already used by {seen_claims[claim_id]}"
+                    f"{record['scene_id']}: source cutout claim {claim_id} already used by "
+                    f"{seen_cutout_claims[claim_id]}"
                 )
             else:
-                seen_claims[claim_id] = record["scene_id"]
+                seen_cutout_claims[claim_id] = record["scene_id"]
 
     linked_scenes = sum(1 for record in records if record.get("claim_ids"))
     cutout_scenes = sum(1 for record in records if record.get("evidence_visual"))
@@ -461,7 +484,14 @@ def build_storyboard(shots: list[dict], details: list[dict], work_dir: Path, *,
         "ledger_sha256": str(evidence.get("ledger_sha256") or ""),
     }
 
-    if any(not record["asset_path"] or not record["provider"] for record in records):
+    hard_block_flags = {"evidence_missing", "evidence_unsupported_status",
+                        "evidence_reference_invalid", "uncovered_beat"}
+    has_plan_integrity_block = any(
+        hard_block_flags.intersection(record.get("plan_evidence_flags") or [])
+        for record in records
+    )
+    if (any(not record["asset_path"] or not record["provider"] for record in records)
+            or has_plan_integrity_block):
         review_status = "blocked"
     elif all_reasons:
         review_status = "needs_review"
@@ -545,6 +575,29 @@ def _approval_valid(payload: dict) -> bool:
     )
 
 
+class StoryboardReviewRequired(RuntimeError):
+    """The pre-render gate needs a human review that does not exist yet.
+
+    Raised instead of a bare RuntimeError so the producer can persist the
+    storyboard as an artifact, park the run as ``awaiting_review`` and resume
+    after the operator approves the contact sheet.  It remains a RuntimeError
+    subclass so existing callers and tests keep their behaviour.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        storyboard_path: str = "",
+        review_status: str = "",
+        reasons: list[str] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.storyboard_path = str(storyboard_path or "")
+        self.review_status = str(review_status or "")
+        self.reasons = list(reasons or [])
+
+
 def enforce_review_gate(storyboard: dict, mode: str | None = None) -> None:
     """Apply the configured pre-render gate.  Default is require, and unknown values fail closed."""
     import os
@@ -564,8 +617,11 @@ def enforce_review_gate(storyboard: dict, mode: str | None = None) -> None:
         return
     reasons = "; ".join(storyboard.get("review_reasons") or [])[:600]
     if mode == "require":
-        raise RuntimeError(
-            f"storyboard review required before render ({status}): {reasons}"
+        raise StoryboardReviewRequired(
+            f"storyboard review required before render ({status}): {reasons}",
+            storyboard_path=str(storyboard.get("json_path") or ""),
+            review_status=status,
+            reasons=list(storyboard.get("review_reasons") or []),
         )
     print(f"[storyboard] review {status}: {reasons}")
 

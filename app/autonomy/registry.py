@@ -21,7 +21,10 @@ class Capability:
     version: str = "1.0"
     permission_scopes: tuple[str, ...] = ("workspace:read", "artifact:write")
     network_access: bool = False
-    sandbox_profile: str = "project-readonly"
+    # Default must satisfy the fail-closed LocalWorkerPolicy allowlist: handlers
+    # execute in-process, so the bounded in-process profile is the honest
+    # default. Networked or bwrap profiles must be declared explicitly.
+    sandbox_profile: str = "in-process-bounded"
     payload_validator: Callable[[dict], dict] | None = None
 
 
@@ -131,6 +134,8 @@ def build_default_registry() -> CapabilityRegistry:
         validate_csv_payload,
         validate_dataset_payload,
         validate_document_payload,
+        validate_storyboard_payload,
+        validate_storyboard,
         validate_generation_payload,
         validate_script_payload,
         validate_topic_payload,
@@ -138,6 +143,15 @@ def build_default_registry() -> CapabilityRegistry:
 
     registry = CapabilityRegistry()
     capabilities = (
+        Capability(
+            "studio.storyboard.validate",
+            "Validate a Studio storyboard timeline locally without provider or render side effects",
+            "zero-default", "project", validate_storyboard,
+            planner_allowed=False, version="1.0",
+            permission_scopes=("input:read",), network_access=False,
+            sandbox_profile="in-process-bounded",
+            payload_validator=validate_storyboard_payload,
+        ),
         Capability(
             "research.topic.collect",
             "Collect source-backed public research and a compact evidence brief",

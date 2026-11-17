@@ -41,7 +41,8 @@ def test_postgres_round_trip_and_idempotency_conflict(store):
     claimed = store.claim(worker_id)
     assert claimed is not None
     store.finish(claimed["task_id"], worker_id,
-                 TaskResult("succeeded", {"ok": True}, evidence={"run_id": uuid.uuid4().hex}))
+                 TaskResult("succeeded", {"ok": True}, evidence={"run_id": uuid.uuid4().hex}),
+                 attempt=claimed["attempts"])
     assert store.get(claimed["task_id"])["status"] == "succeeded"
 
 
@@ -113,7 +114,8 @@ def test_postgres_dag_dependency_context_and_plan_idempotency(store):
     parent = store.claim("pg-parent-worker")
     assert parent["task_id"] == parent_id
     store.finish(parent_id, "pg-parent-worker",
-                 TaskResult("succeeded", {"artifact_path": "outputs/autonomy/artifacts/test.json"}))
+                 TaskResult("succeeded", {"artifact_path": "outputs/autonomy/artifacts/test.json"}),
+                 attempt=parent["attempts"])
     dependencies = store.dependency_results(child_id)
     assert len(dependencies) == 1
     assert dependencies[0]["task_id"] == parent_id
@@ -159,7 +161,8 @@ def test_postgres_recursive_dependency_failure_blocks_all_descendants(store):
     worker_id = "pg-recursive-failure"
     claimed = store.claim(worker_id)
     assert claimed["task_id"] == first
-    store.finish(first, worker_id, TaskResult("failed", error_code="root_failure"))
+    store.finish(first, worker_id, TaskResult("failed", error_code="root_failure"),
+                 attempt=claimed["attempts"])
     assert store.claim("pg-no-eligible-task") is None
     assert store.get(second)["status"] == "blocked"
     assert store.get(third)["status"] == "blocked"
@@ -190,7 +193,8 @@ def test_postgres_health_and_dead_letters_are_read_only(store):
     claimed = store.claim(worker_id)
     assert claimed is not None
     store.finish(claimed["task_id"], worker_id,
-                 TaskResult("failed", error_code="integration_failure"))
+                 TaskResult("failed", error_code="integration_failure"),
+                 attempt=claimed["attempts"])
     health = store.health()
     assert health["database_accessible"] is True
     assert health["total_tasks"] >= 1

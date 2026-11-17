@@ -39,8 +39,91 @@ def _topic(request: TaskRequest) -> str:
     return topic.strip()
 
 
+_STUDIO_VERSION_RE = re.compile(r"[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}")
+_STUDIO_DIGEST_RE = re.compile(r"[a-f0-9]{64}")
+_STUDIO_BEAT_FIELDS = {"id", "name", "start", "end", "kind", "description", "caption"}
+
+
+def _js_json_value(value):
+    if isinstance(value, float) and math.isfinite(value) and value.is_integer():
+        return int(value)
+    if isinstance(value, list):
+        return [_js_json_value(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _js_json_value(item) for key, item in value.items()}
+    return value
+
+
+def validate_studio_snapshot(version_id, content_digest, snapshot) -> dict:
+    if not isinstance(version_id, str) or not _STUDIO_VERSION_RE.fullmatch(version_id):
+        raise ValueError("studio_version_id must be a canonical lowercase UUID")
+    if not isinstance(content_digest, str) or not _STUDIO_DIGEST_RE.fullmatch(content_digest):
+        raise ValueError("studio_content_sha256 must be a 64-character lowercase SHA-256 digest")
+    if not isinstance(snapshot, dict) or set(snapshot) != {"schema", "title", "beats"}:
+        raise ValueError("studio_snapshot must contain only schema, title and beats")
+    if snapshot.get("schema") != "nextdecode.studio.storyboard.v1":
+        raise ValueError("unsupported Studio snapshot schema")
+    title, beats = snapshot.get("title"), snapshot.get("beats")
+    if not isinstance(title, str) or not 1 <= len(title.strip()) <= 160:
+        raise ValueError("Studio snapshot title must contain 1..160 characters")
+    if not isinstance(beats, list) or not 1 <= len(beats) <= 40:
+        raise ValueError("Studio snapshot must contain 1..40 beats")
+    normalized, seen_ids, previous_end = [], set(), 0.0
+    for index, beat in enumerate(beats):
+        if not isinstance(beat, dict) or set(beat) != _STUDIO_BEAT_FIELDS:
+            raise ValueError(f"Studio beat {index + 1} has an invalid field set")
+        beat_id = beat.get("id")
+        if not isinstance(beat_id, int) or isinstance(beat_id, bool) or beat_id < 0 or beat_id in seen_ids:
+            raise ValueError(f"Studio beat {index + 1} has an invalid or duplicate ID")
+        seen_ids.add(beat_id)
+        for field, limit in (("name", 120), ("kind", 80), ("description", 1200), ("caption", 500)):
+            value = beat.get(field)
+            if not isinstance(value, str) or len(value) > limit or (field in {"name", "kind"} and not value.strip()):
+                raise ValueError(f"Studio beat {index + 1} has an invalid {field}")
+        start, end = beat.get("start"), beat.get("end")
+        if (not isinstance(start, (int, float)) or isinstance(start, bool)
+                or not isinstance(end, (int, float)) or isinstance(end, bool)
+                or not math.isfinite(start) or not math.isfinite(end)
+                or start < 0 or end <= start or end > 600 or start < previous_end):
+            raise ValueError(f"Studio beat {index + 1} has invalid or overlapping timing")
+        normalized.append({"id": beat_id, "name": beat["name"], "start": start, "end": end,
+                           "kind": beat["kind"], "description": beat["description"], "caption": beat["caption"]})
+        previous_end = float(end)
+    canonical_value = {"schema": "nextdecode.studio.storyboard.v1", "title": title,
+                       "beats": _js_json_value(normalized)}
+    canonical = json.dumps(canonical_value, ensure_ascii=False, separators=(",", ":"))
+    if len(canonical.encode("utf-8")) > 60_000:
+        raise ValueError("Studio snapshot exceeds the 60000-byte limit")
+    if hashlib.sha256(canonical.encode("utf-8")).hexdigest() != content_digest:
+        raise ValueError("Studio snapshot SHA-256 verification failed")
+    return {"studio_version_id": version_id, "studio_content_sha256": content_digest,
+            "studio_snapshot": canonical_value}
+
+
+def _studio_identity(payload: dict, *, require_snapshot: bool = False) -> dict:
+    version_id, digest, snapshot = (payload.get("studio_version_id"),
+                                    payload.get("studio_content_sha256"),
+                                    payload.get("studio_snapshot"))
+    if version_id is None and digest is None and snapshot is None:
+        if require_snapshot:
+            raise ValueError("Studio version provenance is required")
+        return {}
+    if version_id is None or digest is None:
+        raise ValueError("Studio version ID and content digest must be supplied together")
+    if snapshot is None:
+        if require_snapshot:
+            raise ValueError("Studio snapshot is required for server-side verification")
+        if not isinstance(version_id, str) or not _STUDIO_VERSION_RE.fullmatch(version_id):
+            raise ValueError("studio_version_id must be a canonical lowercase UUID")
+        if not isinstance(digest, str) or not _STUDIO_DIGEST_RE.fullmatch(digest):
+            raise ValueError("studio_content_sha256 must be a 64-character lowercase SHA-256 digest")
+        return {"studio_version_id": version_id, "studio_content_sha256": digest}
+    return validate_studio_snapshot(version_id, digest, snapshot)
+
+
 def validate_topic_payload(payload: dict) -> dict:
-    if set(payload) - {"topic", "max_sources"}:
+    allowed = {"topic", "max_sources", "studio_version_id", "studio_content_sha256", "studio_snapshot"}
+    if not isinstance(payload, dict) or set(payload) - allowed:
         raise ValueError("research payload contains unsupported fields")
     topic = payload.get("topic")
     if not isinstance(topic, str) or not 1 <= len(topic.strip()) <= 200:
@@ -48,17 +131,17 @@ def validate_topic_payload(payload: dict) -> dict:
     max_sources = payload.get("max_sources", 4)
     if not isinstance(max_sources, int) or isinstance(max_sources, bool) or not 1 <= max_sources <= 5:
         raise ValueError("max_sources must be between 1 and 5")
-    return {"topic": topic.strip(), "max_sources": max_sources}
+    return {"topic": topic.strip(), "max_sources": max_sources,
+            **_studio_identity(payload, require_snapshot=payload.get("studio_version_id") is not None)}
 
 
 def validate_script_payload(payload: dict) -> dict:
-    if set(payload) - {"topic"}:
+    if not isinstance(payload, dict) or set(payload) - {"topic", "studio_version_id", "studio_content_sha256"}:
         raise ValueError("script payload contains unsupported fields")
     topic = payload.get("topic")
     if not isinstance(topic, str) or not 1 <= len(topic.strip()) <= 200:
         raise ValueError("topic must be 1..200 characters")
-    return {"topic": topic.strip()}
-
+    return {"topic": topic.strip(), **_studio_identity(payload)}
 
 def validate_generation_payload(payload: dict) -> dict:
     if set(payload) - {"topic", "dry_run", "approval_required"}:
@@ -116,6 +199,11 @@ def _verified_artifact(output: dict) -> tuple[bool, str | None]:
         return False, "artifact_run_id_mismatch"
     if envelope.get("human_review_status") != "pending":
         return False, "artifact_review_state_invalid"
+    if output.get("studio_version_id") is not None or output.get("studio_content_sha256") is not None:
+        expected = {"studio_version_id": output.get("studio_version_id"),
+                    "studio_content_sha256": output.get("studio_content_sha256")}
+        if envelope.get("studio_provenance") != expected:
+            return False, "artifact_studio_provenance_mismatch"
     return True, None
 
 
@@ -186,12 +274,21 @@ def _run_pipeline_short(topic: str) -> TaskResult:
 
 def research_topic_collect(request: TaskRequest) -> TaskResult:
     payload = validate_topic_payload(request.payload)
-    return _run_module(
-        "app.autonomy.specialist_cli",
-        ["research", "--topic", payload["topic"], "--max-sources", str(payload["max_sources"])],
-        network_access=True,
-        timeout_seconds=600,
-    )
+    args = ["research", "--topic", payload["topic"], "--max-sources", str(payload["max_sources"])]
+    if payload.get("studio_version_id"):
+        args.extend(["--studio-version-id", payload["studio_version_id"],
+                     "--studio-content-sha256", payload["studio_content_sha256"]])
+    result = _run_module("app.autonomy.specialist_cli", args, network_access=True,
+                         timeout_seconds=600)
+    if result.status != "succeeded" or not payload.get("studio_version_id"):
+        return result
+    identity = {key: payload[key] for key in ("studio_version_id", "studio_content_sha256")}
+    if any(result.output.get(key) != value for key, value in identity.items()):
+        return TaskResult("failed", error_code="studio_artifact_provenance_mismatch",
+                          evidence={**result.evidence, "studio_snapshot_sha256_verified": True})
+    return TaskResult(result.status, {**result.output, **identity}, result.error_code,
+                      result.retryable, {**result.evidence, **identity,
+                                         "studio_snapshot_sha256_verified": True})
 
 
 def _script_draft(request: TaskRequest, specialist: str) -> TaskResult:
@@ -212,10 +309,28 @@ def _script_draft(request: TaskRequest, specialist: str) -> TaskResult:
         artifact_sha256 = output.get("artifact_sha256")
         if not artifact_path or not artifact_sha256:
             return TaskResult("blocked", error_code="research_dependency_missing_artifact")
+        research_version = output.get("studio_version_id")
+        research_digest = output.get("studio_content_sha256")
+        requested_version = payload.get("studio_version_id")
+        requested_digest = payload.get("studio_content_sha256")
+        if requested_version is not None and (research_version != requested_version or research_digest != requested_digest):
+            return TaskResult("blocked", error_code="studio_research_provenance_mismatch")
+        if requested_version is None and research_version is not None:
+            return TaskResult("blocked", error_code="studio_provenance_required_for_research_dependency")
         args.extend(["--research-artifact", str(artifact_path),
                      "--research-sha256", str(artifact_sha256)])
-    return _run_module("app.autonomy.specialist_cli", args, network_access=True,
-                       local_model_access=True, timeout_seconds=1800)
+        if requested_version is not None:
+            args.extend(["--studio-version-id", requested_version,
+                         "--studio-content-sha256", requested_digest])
+    elif payload.get("studio_version_id") is not None:
+        return TaskResult("blocked", error_code="research_dependency_required")
+    result = _run_module("app.autonomy.specialist_cli", args, network_access=True,
+                         local_model_access=True, timeout_seconds=1800)
+    if result.status == "succeeded" and payload.get("studio_version_id"):
+        identity = {key: payload[key] for key in ("studio_version_id", "studio_content_sha256")}
+        return TaskResult(result.status, {**result.output, **identity}, result.error_code,
+                          result.retryable, {**result.evidence, **identity})
+    return result
 
 
 def short_script_draft(request: TaskRequest) -> TaskResult:
@@ -246,6 +361,91 @@ def publish_check(request: TaskRequest) -> TaskResult:
          "requested": request.payload.get("target", "all")},
         error_code="external_action_guard",
     )
+
+
+def validate_storyboard_payload(payload: dict) -> dict:
+    if not isinstance(payload, dict) or set(payload) - {"title", "target_duration_seconds", "scenes", "studio_version_id", "studio_content_sha256"}:
+        raise ValueError("storyboard payload contains unsupported fields")
+    version_id = payload.get("studio_version_id")
+    content_digest = payload.get("studio_content_sha256")
+    if (version_id is None) != (content_digest is None):
+        raise ValueError("Studio version ID and content digest must be supplied together")
+    if version_id is not None and (not isinstance(version_id, str) or not re.fullmatch(r"[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}", version_id)):
+        raise ValueError("studio_version_id must be a canonical lowercase UUID")
+    if content_digest is not None and (not isinstance(content_digest, str) or not re.fullmatch(r"[a-f0-9]{64}", content_digest)):
+        raise ValueError("studio_content_sha256 must be a 64-character lowercase SHA-256 digest")
+    title = payload.get("title", "Untitled storyboard")
+    if not isinstance(title, str) or not 1 <= len(title.strip()) <= 160:
+        raise ValueError("storyboard title must contain 1..160 characters")
+    target = payload.get("target_duration_seconds", 60)
+    if not isinstance(target, (int, float)) or isinstance(target, bool) or not 1 <= target <= 600:
+        raise ValueError("target_duration_seconds must be between 1 and 600")
+    scenes = payload.get("scenes")
+    if not isinstance(scenes, list) or not 1 <= len(scenes) <= 40:
+        raise ValueError("storyboard must contain 1..40 scenes")
+    normalized = []
+    seen_ids = set()
+    previous_end = 0.0
+    for index, scene in enumerate(scenes):
+        if not isinstance(scene, dict) or set(scene) - {"id", "name", "start", "end", "kind", "description", "caption"}:
+            raise ValueError(f"scene {index + 1} contains unsupported fields")
+        scene_id = scene.get("id")
+        if not isinstance(scene_id, int) or isinstance(scene_id, bool) or scene_id < 0 or scene_id in seen_ids:
+            raise ValueError(f"scene {index + 1} has an invalid or duplicate id")
+        seen_ids.add(scene_id)
+        name = scene.get("name")
+        kind = scene.get("kind")
+        description = scene.get("description", "")
+        caption = scene.get("caption", "")
+        for field_name, value, limit in (("name", name, 120), ("kind", kind, 80),
+                                         ("description", description, 1200), ("caption", caption, 500)):
+            if not isinstance(value, str) or len(value) > limit or (field_name in {"name", "kind"} and not value.strip()):
+                raise ValueError(f"scene {index + 1} has an invalid {field_name}")
+        start, end = scene.get("start"), scene.get("end")
+        if (not isinstance(start, (int, float)) or isinstance(start, bool)
+                or not isinstance(end, (int, float)) or isinstance(end, bool)
+                or not math.isfinite(start) or not math.isfinite(end)
+                or start < 0 or end <= start or end > 600):
+            raise ValueError(f"scene {index + 1} has invalid timing")
+        if start < previous_end:
+            raise ValueError(f"scene {index + 1} overlaps the previous scene")
+        normalized.append({"id": scene_id, "name": name.strip(), "start": float(start),
+                           "end": float(end), "kind": kind.strip(),
+                           "description": description.strip(), "caption": caption.strip()})
+        previous_end = float(end)
+    result = {"title": title.strip(), "target_duration_seconds": float(target), "scenes": normalized}
+    if version_id is not None:
+        result["studio_version_id"] = version_id
+        result["studio_content_sha256"] = content_digest
+    return result
+
+
+def validate_storyboard(request: TaskRequest) -> TaskResult:
+    payload = validate_storyboard_payload(request.payload)
+    scenes = payload["scenes"]
+    gaps = []
+    for previous, current in zip(scenes, scenes[1:]):
+        if current["start"] > previous["end"]:
+            gaps.append({"after_scene_id": previous["id"],
+                         "gap_seconds": round(current["start"] - previous["end"], 3)})
+    total_duration = max(scene["end"] for scene in scenes)
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    return TaskResult("succeeded", {
+        "title": payload["title"],
+        "scene_count": len(scenes),
+        "target_duration_seconds": payload["target_duration_seconds"],
+        "actual_duration_seconds": total_duration,
+        "timeline_gaps": gaps,
+        "timeline_contiguous": not gaps,
+        "studio_version_id": payload.get("studio_version_id"),
+        "studio_content_sha256": payload.get("studio_content_sha256"),
+        "human_review_required": True,
+        "external_actions_allowed": False,
+    }, evidence={"validation": "studio.storyboard.v1", "input_sha256": digest,
+                 "scene_ids": [scene["id"] for scene in scenes],
+                 "studio_version_id": payload.get("studio_version_id"),
+                 "studio_content_sha256": payload.get("studio_content_sha256")})
 
 
 def validate_document_payload(payload: dict) -> dict:

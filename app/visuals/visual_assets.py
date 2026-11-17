@@ -64,16 +64,48 @@ def _cool_down(provider: str, error) -> None:
 
 
 def _chain(provider=None):
-    if provider: return [provider]
-    if VISUAL_PROVIDER: return [VISUAL_PROVIDER]
-    head = IMAGE_PROVIDER if IMAGE_PROVIDER else None
+    # A run-level free-only policy is stronger than both explicit provider
+    # arguments and environment preferences. It permits only Wikimedia Commons
+    # and the local procedural fallback; no metered image API can be reached.
+    free_only = os.getenv("NEXTDECODE_FREE_VISUALS_ONLY", "").strip().lower() in {"1", "true", "yes", "on"}
+    if free_only:
+        allowed = {"wikimedia", "local"}
+        # Pollinations returned HTTP 402 without a token in live qualification,
+        # so it is not considered zero-budget. Strict free-only means Commons/local.
+        if provider:
+            return [provider] if provider in allowed and _PROVIDER_COOLDOWN.get(provider, 0) <= time.time() else []
+        head = VISUAL_PROVIDER or IMAGE_PROVIDER or None
+        chain = []
+        if head in allowed and _PROVIDER_COOLDOWN.get(head, 0) <= time.time():
+            chain.append(head)
+        for candidate in ("wikimedia", "local"):
+            if candidate not in chain and _PROVIDER_COOLDOWN.get(candidate, 0) <= time.time():
+                chain.append(candidate)
+        return chain
+
+    # An explicit function argument is a strict one-provider override. Environment
+    # preferences are ordering hints: a failed preferred provider must not disable
+    # the configured fallback chain.
+    if provider:
+        return [provider]
+    head = VISUAL_PROVIDER or IMAGE_PROVIDER or None
     configured = set(available_providers())
     now = time.time()
     chain = []
-    if head and head in PROVIDERS: chain.append(head)
-    for p in PROVIDERS:
-        if p not in chain and p in configured and _PROVIDER_COOLDOWN.get(p, 0) <= now:
-            chain.append(p)
+    if (
+        head
+        and head in PROVIDERS
+        and head in configured
+        and _PROVIDER_COOLDOWN.get(head, 0) <= now
+    ):
+        chain.append(head)
+    for candidate in PROVIDERS:
+        if (
+            candidate not in chain
+            and candidate in configured
+            and _PROVIDER_COOLDOWN.get(candidate, 0) <= now
+        ):
+            chain.append(candidate)
     if "local" not in chain:
         chain.append("local")
     return chain
@@ -94,7 +126,8 @@ def _pollinations(prompt, out_path):
     tech_anchor = "dark moody corporate technology visual, NO nature, NO plants, NO outdoors: "
     enhanced_prompt = f"{tech_anchor} {prompt}, 8k resolution, cinematic lighting, photorealistic, vertical 9:16 composition"
     url = f"https://image.pollinations.ai/prompt/{urllib.parse.quote(enhanced_prompt)}?width=720&height=1280&nologo=true&model=flux"
-    if POLLINATIONS_KEY:
+    # The strict free-only policy deliberately omits any configured token.
+    if POLLINATIONS_KEY and os.getenv("NEXTDECODE_FREE_VISUALS_ONLY", "").strip().lower() not in {"1", "true", "yes", "on"}:
         url += f"&key={POLLINATIONS_KEY}"
     last = None
     for attempt in range(3):

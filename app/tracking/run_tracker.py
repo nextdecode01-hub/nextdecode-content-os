@@ -185,14 +185,84 @@ class RunTracker:
 
     # -- stages ------------------------------------------------------------
 
+    def start_stage(self, name: str, *, started_at: str | None = None) -> dict:
+        """Persist a stage as active before its work begins."""
+        if self.manifest.get("status") != "in_progress":
+            raise RuntimeError(f"run {self.run_id} is not active")
+        stages = self.manifest.setdefault("stages", [])
+        if not isinstance(stages, list):
+            raise RuntimeError(f"run {self.run_id} has malformed stage history")
+        if any(
+            isinstance(item, dict)
+            and item.get("name") == name
+            and item.get("status") == "in_progress"
+            for item in stages
+        ):
+            raise RuntimeError(f"stage {name!r} is already active for run {self.run_id}")
+        entry = {"name": name, "started_at": started_at or _iso(_utcnow()),
+                 "finished_at": None, "status": "in_progress"}
+        stages.append(entry)
+        self._write_manifest()
+        return entry
+
+    def finish_stage(self, name: str, *, status: str = "ok", finished_at: str | None = None, provenance: dict | None = None) -> dict:
+        """Finalize the most recent active stage without rewriting prior history.
+
+        ``provenance`` optionally records the exact engine/provider/model that ran
+        the stage, so the manifest is the single honest source of "what made this".
+        """
+        if status not in {"ok", "failed", "skipped"}:
+            raise ValueError(f"unsupported terminal stage status: {status}")
+        stages = self.manifest.setdefault("stages", [])
+        if not isinstance(stages, list):
+            raise RuntimeError(f"run {self.run_id} has malformed stage history")
+        entry = next((
+            item for item in reversed(stages)
+            if isinstance(item, dict)
+            and item.get("name") == name
+            and item.get("status") == "in_progress"
+        ), None)
+        if entry is None:
+            raise RuntimeError(f"stage {name!r} is not active for run {self.run_id}")
+        entry["status"] = status
+        entry["finished_at"] = finished_at or _iso(_utcnow())
+        if provenance is not None and isinstance(provenance, dict):
+            entry["provenance"] = provenance
+        self._write_manifest()
+        return entry
+
     def record_stage(self, name: str, *, started_at: str, finished_at: str, status: str = "ok") -> None:
-        """Record a completed (or failed) stage with timestamps."""
-        self.manifest.setdefault("stages", []).append(
+        """Record a completed (or failed) stage; retained for legacy callers."""
+        stages = self.manifest.setdefault("stages", [])
+        if not isinstance(stages, list):
+            raise RuntimeError(f"run {self.run_id} has malformed stage history")
+        stages.append(
             {"name": name, "started_at": started_at, "finished_at": finished_at, "status": status}
         )
         self._write_manifest()
 
     # -- promotion ---------------------------------------------------------
+
+    def _validated_promotion_journal(self, journal_path: str | Path | None = None) -> Path:
+        """Return the sole journal path authorized for this run.
+
+        The manifest is persisted data and must not redirect journal writes.
+        """
+        promotions_dir = self.index_path.parent.resolve() / "promotions"
+        expected = promotions_dir / f"{self.run_id}.json"
+        candidate = Path(journal_path) if journal_path is not None else expected
+        # Compare normalized lexical paths, not resolve(): resolve() would
+        # follow a malicious promotions-directory or journal-file symlink.
+        normalized_candidate = Path(os.path.abspath(candidate))
+        if normalized_candidate != expected:
+            raise RuntimeError("promotion journal path does not match this run")
+        if promotions_dir.is_symlink():
+            raise RuntimeError("promotion journal directory must not be a symlink")
+        if promotions_dir.exists() and not promotions_dir.is_dir():
+            raise RuntimeError("promotion journal directory is not a directory")
+        if expected.is_symlink():
+            raise RuntimeError("promotion journal file must not be a symlink")
+        return expected
 
     def begin_promotion(self, targets: dict[str, str], *, journal_path: Path | None = None) -> Path:
         """Open the promotion window and record the promotion journal.
@@ -209,13 +279,13 @@ class RunTracker:
                 f"run {self.run_id} is terminal ({self.manifest.get('status')}); "
                 "promotion is only allowed while the run is in_progress"
             )
-        if self.manifest.get("promotion", {}).get("status") == "promoting":
+        existing_promotion = self.manifest.get("promotion")
+        if isinstance(existing_promotion, dict) and existing_promotion.get("status") == "promoting":
             raise RuntimeError(
                 f"run {self.run_id} already has an open promotion window "
                 f"({self.manifest['promotion'].get('journal_path')})"
             )
-        journal = Path(journal_path) if journal_path is not None else (
-            self.index_path.parent / "promotions" / f"{self.run_id}.json")
+        journal = self._validated_promotion_journal(journal_path)
         journal.parent.mkdir(parents=True, exist_ok=True)
         started = _iso(_utcnow())
         _atomic_write_json(journal, {
@@ -243,8 +313,10 @@ class RunTracker:
                 f"run {self.run_id} has no open promotion window to complete"
                 f" (status={manifest_promotion.get('status')!r})"
             )
-        journal = Path(manifest_promotion["journal_path"])
+        journal = self._validated_promotion_journal(manifest_promotion.get("journal_path"))
         entry = json.loads(journal.read_text(encoding="utf-8"))
+        if entry.get("run_id") != self.run_id:
+            raise RuntimeError(f"promotion journal identity mismatch for run {self.run_id}")
         if entry.get("status") != "promoting":
             raise RuntimeError(
                 f"promotion journal for run {self.run_id} is not open "
@@ -333,10 +405,28 @@ class RunTracker:
 
     def mark_ok(self, *, finished_at: datetime | None = None) -> dict:
         """Transition the manifest to ``ok`` and append the index record."""
-        if self.manifest.get("status") not in (None, "in_progress"):
+        if self.manifest.get("status") not in (None, "in_progress", "awaiting_review"):
             raise RuntimeError(
                 f"run {self.run_id} is already terminal ({self.manifest.get('status')}); "
                 "cannot transition to ok"
+            )
+        stages = self.manifest.get("stages", [])
+        if not isinstance(stages, list):
+            raise RuntimeError(f"run {self.run_id} has malformed stage history; cannot transition to ok")
+        active_stages = [
+            item.get("name", "unknown")
+            for item in stages
+            if isinstance(item, dict) and item.get("status") == "in_progress"
+        ]
+        if active_stages:
+            raise RuntimeError(
+                f"run {self.run_id} has active stage(s): {', '.join(map(str, active_stages))}; "
+                "cannot transition to ok"
+            )
+        promotion = self.manifest.get("promotion")
+        if isinstance(promotion, dict) and promotion.get("status") == "promoting":
+            raise RuntimeError(
+                f"run {self.run_id} has an open promotion window; cannot transition to ok"
             )
         self.manifest["status"] = "ok"
         self.manifest["finished_at"] = _iso(finished_at or _utcnow())
@@ -351,13 +441,14 @@ class RunTracker:
         exc: BaseException | None = None,
         error_category: str = DEFAULT_ERROR_CATEGORY,
         finished_at: datetime | None = None,
+        detail: str | None = None,
     ) -> dict:
         """Record a sanitized failure: manifest, failure.json and index line.
 
-        Only the exception *type name* is stored — never the message — so
-        credentials or URLs embedded in exception text cannot leak into logs.
+        Exception messages are never copied automatically. Callers may supply a
+        bounded diagnostic only after applying their secret-redaction policy.
         """
-        if self.manifest.get("status") not in (None, "in_progress"):
+        if self.manifest.get("status") not in (None, "in_progress", "awaiting_review"):
             raise RuntimeError(
                 f"run {self.run_id} is already terminal ({self.manifest.get('status')}); "
                 "cannot transition to failed"
@@ -368,25 +459,43 @@ class RunTracker:
             "error_type": type(exc).__name__ if exc is not None else "UnknownError",
             "error_category": category,
         }
+        # The caller supplies an already-redacted, bounded diagnostic. Keep it
+        # separate from the stable error taxonomy and omit it when unavailable.
+        if detail:
+            failure["detail"] = str(detail)[:500]
         self.manifest["status"] = "failed"
         self.manifest["failure"] = failure
         self.manifest["finished_at"] = _iso(finished_at or _utcnow())
+        # Any stage still active at terminal failure is known to have failed;
+        # preserve its original start time and close it at the run failure time.
+        stage_history = self.manifest.get("stages", [])
+        if isinstance(stage_history, list):
+            for stage_entry in stage_history:
+                if isinstance(stage_entry, dict) and stage_entry.get("status") == "in_progress":
+                    stage_entry["status"] = "failed"
+                    stage_entry["finished_at"] = self.manifest["finished_at"]
         # If a promotion window was open, close it as an explicit failure so no
         # downstream consumer can mistake a mixed pair for a completed promotion.
-        manifest_promotion = self.manifest.get("promotion") or {}
+        manifest_promotion = self.manifest.get("promotion")
+        if not isinstance(manifest_promotion, dict):
+            manifest_promotion = {}
         if manifest_promotion.get("status") == "promoting":
-            journal = Path(manifest_promotion["journal_path"])
             try:
+                journal = self._validated_promotion_journal(manifest_promotion.get("journal_path"))
                 entry = json.loads(journal.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
+                if entry.get("run_id") != self.run_id:
+                    raise RuntimeError("promotion journal identity mismatch")
+            except (OSError, RuntimeError, json.JSONDecodeError):
+                journal = None
                 entry = {"run_id": self.run_id, "status": "promoting"}
             if entry.get("status") in {"promoting", None}:
                 entry["status"] = "failed"
                 entry["finished_at"] = self.manifest["finished_at"]
-                try:
-                    _atomic_write_json(journal, entry)
-                except OSError:
-                    pass  # manifest failure state is authoritative regardless
+                if journal is not None:
+                    try:
+                        _atomic_write_json(journal, entry)
+                    except OSError:
+                        pass  # manifest failure state is authoritative regardless
             manifest_promotion["status"] = "failed"
             manifest_promotion["finished_at"] = self.manifest["finished_at"]
             self.manifest["promotion"] = manifest_promotion
@@ -395,6 +504,67 @@ class RunTracker:
             **failure,
             "written_at": self.manifest["finished_at"],
         })
+        self._write_manifest()
+        self._append_index()
+        return self.manifest
+
+    def reopen(self) -> dict:
+        """Reopen a parked ``awaiting_review`` run so render can continue.
+
+        This is the explicit counterpart of :meth:`mark_awaiting_review`.  It
+        moves the manifest from ``awaiting_review`` back to ``in_progress`` so
+        stage records can be written.  The run is not marked ``ok`` until the
+        promotion journal confirms success.
+        """
+        if self.manifest.get("status") == "awaiting_review":
+            transition = "reopened"
+        elif self.manifest.get("status") == "in_progress":
+            # A previous resume crashed after reopening (e.g. render/QA failure).
+            # Reopening again must be a safe no-op so the operator can retry.
+            transition = "resumed"
+        else:
+            raise RuntimeError(
+                f"run {self.run_id} is {self.manifest.get('status')}; only a parked "
+                "awaiting_review run can be reopened"
+            )
+        self.manifest["status"] = "in_progress"
+        self.manifest["reopened_at"] = _iso(_utcnow())
+        self._write_manifest()
+        return self.manifest
+
+    def mark_awaiting_review(
+        self,
+        *,
+        stage: str,
+        detail: str | None = None,
+        finished_at: datetime | None = None,
+    ) -> dict:
+        """Park the run as ``awaiting_review`` (non-terminal) after a review gate stop.
+
+        The run can later be reopened with :func:`open_run` and resumed through
+        :func:`pipeline.resume`.  This is not a failure: no ``failure.json`` is
+        written and the run is not terminal.
+        """
+        if self.manifest.get("status") not in (None, "in_progress", "awaiting_review"):
+            raise RuntimeError(
+                f"run {self.run_id} is {self.manifest.get('status')}; "
+                "cannot park as awaiting_review"
+            )
+        parked_at = _iso(finished_at or _utcnow())
+        review = {"stage": str(stage), "parked_at": parked_at}
+        if detail:
+            review["detail"] = str(detail)[:500]
+        self.manifest["status"] = "awaiting_review"
+        self.manifest["review"] = review
+        self.manifest["finished_at"] = None
+        # Close any active stage at the park time so the run is not left with
+        # an open stage while parked.
+        stage_history = self.manifest.get("stages", [])
+        if isinstance(stage_history, list):
+            for stage_entry in stage_history:
+                if isinstance(stage_entry, dict) and stage_entry.get("status") == "in_progress":
+                    stage_entry["status"] = "parked"
+                    stage_entry["finished_at"] = parked_at
         self._write_manifest()
         self._append_index()
         return self.manifest
@@ -473,3 +643,26 @@ def start_run(
     tracker = RunTracker(run_dir.name, run_dir, manifest, index_path=index_path)
     tracker._write_manifest()
     return tracker
+
+
+def open_run(
+    run_dir: Path | str,
+    *,
+    index_path: Path | str | None = None,
+    runs_root: Path | str | None = None,
+) -> RunTracker:
+    """Reopen an existing run directory by manifest and return a RunTracker.
+
+    Used to resume a parked ``awaiting_review`` run.  ``run_dir`` may be the
+    full run directory path or a run-id-style name resolved under ``runs_root``.
+    """
+    run_dir = Path(run_dir)
+    if not run_dir.is_dir() and runs_root is not None:
+        candidate = Path(runs_root) / run_dir
+        if candidate.is_dir():
+            run_dir = candidate
+    if not run_dir.is_dir():
+        raise RuntimeError(f"run directory not found: {run_dir}")
+    manifest = load_manifest(run_dir)
+    index_path = Path(index_path or DEFAULT_INDEX_PATH)
+    return RunTracker(manifest["run_id"], run_dir, manifest, index_path=index_path)

@@ -1,0 +1,44 @@
+{
+  "schema": "nextdecode.video-generation-policy.v1",
+  "status": "disabled_zero_budget",
+  "enabled": false,
+  "default_budget_usd": 0,
+  "default_budget_inr": 0,
+  "require_explicit_owner_approval": true,
+  "require_per_run_budget": true,
+  "allow_automatic_generation": false,
+  "allow_automatic_fallback_to_paid_provider": false,
+  "human_approval_before_publishing": true,
+  "routes": {
+    "direct_provider_apis": {
+      "supported": true,
+      "enabled": false,
+      "providers": ["kling", "google_veo"]
+    },
+    "unified_gateway": {
+      "supported": true,
+      "enabled": false,
+      "provider": "runway",
+      "providers": ["kling", "google_veo", "seedance", "hailuo", "wan", "runway"]
+    }
+  },
+  "selection": {
+    "primary": null,
+    "fallback": null,
+    "qualification_required": true
+  },
+  "free_first_default_sources": [
+    "pixabay",
+    "pexels",
+    "coverr",
+    "openverse",
+    "local_svg_components",
+    "local_screen_components",
+    "ffmpeg"
+  ],
+  "approval_environment": {
+    "approved_flag": "NEXTDECODE_VIDEO_GENERATION_APPROVED",
+    "budget_usd": "NEXTDECODE_VIDEO_GENERATION_BUDGET_USD",
+    "allowed_route": "NEXTDECODE_VIDEO_GENERATION_ROUTE"
+  }
+}

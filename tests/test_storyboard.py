@@ -134,6 +134,21 @@ class StoryboardArtifactTests(unittest.TestCase):
         self.assertEqual(result["review_status"], "blocked")
         self.assertIn("no usable selected asset", " ".join(result["review_reasons"]))
 
+    def test_shot_plan_evidence_gaps_block_storyboard(self):
+        shots = _shots(2)
+        shots[0]["evidence_flags"] = ["evidence_missing"]
+        shots[1]["evidence_flags"] = ["uncovered_beat"]
+        details = [
+            _detail(0, _png(self.dir / "a.png")),
+            _detail(1, _png(self.dir / "b.png")),
+        ]
+        result = storyboard.build_storyboard(shots, details, self.dir / "work")
+        self.assertEqual(result["review_status"], "blocked")
+        self.assertIn("shot-plan integrity: evidence_missing", " ".join(result["review_reasons"]))
+        self.assertIn("shot-plan integrity: uncovered_beat", " ".join(result["review_reasons"]))
+        with self.assertRaisesRegex(RuntimeError, "blocked"):
+            storyboard.approve_storyboard(result["json_path"], "reviewer")
+
     def test_all_high_assets_auto_approve(self):
         shots = _shots(2)
         details = [

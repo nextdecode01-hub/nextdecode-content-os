@@ -35,8 +35,8 @@ def add(label: str, ready: bool, required: str, *, optional: bool = False) -> No
 
 add(
     "AI script provider",
-    bool(env_value("GEMINI_API_KEY") or env_value("GROQ_API_KEY") or env_value("OMNIROUTE_API_KEY") or env_value("OLLAMA_BASE_URL")),
-    "Set OMNIROUTE_API_KEY, GEMINI_API_KEY, GROQ_API_KEY, or OLLAMA_BASE_URL in .env",
+    bool(env_value("GEMINI_API_KEY") or env_value("GROQ_API_KEY") or env_value("NVIDIA_API_KEY") or env_value("CF_ACCOUNT_ID") and env_value("CF_API_TOKEN")),
+    "Set GEMINI_API_KEY, GROQ_API_KEY, NVIDIA_API_KEY, or both CF_ACCOUNT_ID and CF_API_TOKEN in .env",
 )
 for command in ("ffmpeg", "ffprobe", "edge-tts"):
     add(f"Command: {command}", command_available(command), f"Install {command} in WSL")

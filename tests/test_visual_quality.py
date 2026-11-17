@@ -28,7 +28,7 @@ class VisualQualityTests(unittest.TestCase):
                 "asset_path": str(asset),
             }))
             self.assertTrue(has_publishable_visuals({
-                "mode": "pexels_stock",
+                "mode": "coverr_stock",
                 "asset_count": 2,
                 "asset_path": str(asset),
             }))

@@ -1,0 +1,2 @@
+from pathlib import Path
+p=Path(__file__).parent/'src/pages/home.tsx';s=p.read_text();old='if(!busy&&!error&&(!h.data||!t.data||!c.data))return <Loading/>;const q=';new='if(error)return <ErrorBox error={error}/>;if(!h.data||!t.data||!c.data)return <Loading/>;const q=';assert old in s;s=s.replace(old,new,1);p.write_text(s);print('fixed')

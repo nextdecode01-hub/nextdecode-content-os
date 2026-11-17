@@ -394,3 +394,26 @@ class RightsAndCutoutTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SubjectScopedNumericConflictTests(unittest.TestCase):
+    def test_unrelated_model_parameter_count_is_not_a_conflict_for_generic_moe_claim(self):
+        claim = (
+            "The key insight: You can have a model with 256 billion total parameters "
+            "but only activate ~8 billion for any given token."
+        )
+        unrelated_model = (
+            "The key insight is that Google explored this with GShard, which explores "
+            "scaling up transformers beyond 600 billion parameters."
+        )
+        support = lineage.anchor_support(claim, unrelated_model)
+        self.assertEqual(support["conflicts"], [])
+        self.assertNotEqual(support["strength"], "full")
+
+    def test_different_parameter_count_for_same_named_model_remains_a_conflict(self):
+        claim = "DeepSeek-V3 has 671 billion total parameters."
+        source = "DeepSeek-V3 has 600 billion total parameters."
+        support = lineage.anchor_support(claim, source)
+        self.assertTrue(support["conflicts"], support)
+        self.assertEqual(support["conflicts"][0]["expected"], "671 billion")
+        self.assertEqual(support["conflicts"][0]["found"], "600 billion")

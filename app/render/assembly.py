@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 from app.render.ffmpeg_tools import (
@@ -27,6 +28,8 @@ from app.render.ffmpeg_tools import (
     synthesize_sfx,
 )
 from app.render.shots import render_shot
+from app.render.edit_director import build_edit_decisions, execute_clip, validate_final_output, write_edl
+from app.render.otio_export import export_edl_to_otio
 from app.visuals import chain as visual_chain
 from app.visuals import motion_director
 from app.visuals import stock_fetcher
@@ -53,10 +56,67 @@ def _serialize_cutout_evidence(cutouts: dict) -> list[dict]:
     ]
 
 
+def _json_safe(value: object) -> object:
+    """Round-trip a planning structure through JSON with explicit str fallback."""
+    return json.loads(json.dumps(value, default=str))
+
+
+def _write_render_plan(
+    work_dir: Path, *, shots: list[dict], resolved_scenes: list[dict], planner: dict,
+    assets: list[dict], motion_plan: list[dict], evidence: dict, storyboard: dict,
+    width: int, height: int, fps: int,
+    audio_path: str = "", ass_path: str = "", captions_path: str = "",
+    ledger_path: str = "", script_sha256: str = "", ledger_sha256: str = "",
+    duration: float = 0.0,
+) -> Path:
+    """Persist everything the render needs so an approved plan can be resumed.
+
+    The gate runs after scene resolution, so a review stop would otherwise throw
+    away downloaded assets and resolved briefs.  The plan records the exact
+    inputs; a resume re-uses them instead of resolving again, which also keeps
+    the approved contact sheet and scene digest byte-identical.
+    """
+    evidence_payload = dict(evidence)
+    ledger = evidence_payload.pop("ledger", None)
+    evidence_payload["ledger_present"] = bool(ledger)
+    payload = {
+        "version": 1,
+        "written_at": datetime.now(timezone.utc).isoformat(),
+        "shots": _json_safe(shots),
+        "resolved_scenes": [
+            {
+                "shot": _json_safe(item.get("shot") or {}),
+                "detail": _json_safe(item.get("detail") or {}),
+                "asset_path": str(item.get("asset_path") or ""),
+            }
+            for item in resolved_scenes
+        ],
+        "planner": _json_safe(planner),
+        "assets": _json_safe(assets),
+        "motion_plan": _json_safe(motion_plan),
+        "evidence": _json_safe(evidence_payload),
+        "storyboard_path": str(storyboard.get("json_path") or ""),
+        "audio_path": str(audio_path or ""),
+        "ass_path": str(ass_path or ""),
+        "captions_path": str(captions_path or ""),
+        "ledger_path": str(ledger_path or ""),
+        "script_sha256": str(script_sha256 or ""),
+        "ledger_sha256": str(ledger_sha256 or ""),
+        "duration": float(duration or 0.0),
+        "width": width,
+        "height": height,
+        "fps": fps,
+    }
+    path = Path(work_dir) / "render_plan.json"
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
 def render_video(shots: list[dict], audio_path: Path, out_path: Path, *, work_dir: Path,
                  ass_path: Path | None = None, caption_words_path: Path | None = None,
                  width: int = WIDTH, height: int = HEIGHT,
-                 fps: int = FPS, evidence: dict | None = None) -> dict:
+                 fps: int = FPS, evidence: dict | None = None,
+                 resume_from: Path | str | None = None) -> dict:
     """Render a full multi-shot short. -> {'status','path','duration','shots','width',
     'height','music','sfx_count'} plus visual/audio diagnostics.
 
@@ -71,10 +131,18 @@ def render_video(shots: list[dict], audio_path: Path, out_path: Path, *, work_di
     out_path.parent.mkdir(parents=True, exist_ok=True)
     audio_path = Path(audio_path)
 
-    if not shots:
-        raise RuntimeError("render_video requires at least one shot")
     if not audio_path.is_file():
         raise RuntimeError(f"render_video voice track is missing: {audio_path}")
+    resume_path = Path(resume_from) if resume_from else None
+    restored: dict = {}
+    if resume_path is not None:
+        if not resume_path.is_file():
+            raise RuntimeError(f"render resume plan is missing: {resume_path}")
+        restored = json.loads(resume_path.read_text(encoding="utf-8"))
+        shots = [dict(item) for item in restored.get("shots") or []]
+        print(f"[resume] continuing from {resume_path.name}: {len(shots)} planned shot(s)")
+    if not shots:
+        raise RuntimeError("render_video requires at least one shot")
 
     total_duration = float(shots[-1]["end"])
     adur = _probe_duration(audio_path)
@@ -88,135 +156,192 @@ def render_video(shots: list[dict], audio_path: Path, out_path: Path, *, work_di
     assets: list[dict] = []
     used_titles: set[str] = set()
     render_diagnostics: list[dict] = []
-    planner = visual_chain.plan_scenes(shots)
     dry_run = os.getenv("DRY_RUN", "").strip().lower() in {"1", "true", "yes"}
-    print(f"[visual] plan: up to {planner['stock_cap']} stock b-roll scene(s) of {planner['total']}")
+    storyboard_gate = os.getenv("STORYBOARD_GATE", "require").strip().lower()
+    if not dry_run and storyboard_gate != "require":
+        raise RuntimeError(
+            "production render requires STORYBOARD_GATE=require; "
+            f"received {storyboard_gate!r}. Non-blocking modes are dry-run only."
+        )
+    if resume_path is not None:
+        planner = restored.get("planner") or {}
+        evidence = dict(restored.get("evidence") or {})
+        if evidence.pop("ledger_present", False):
+            evidence["ledger"] = {"resumed": True}
+        resolved_scenes = []
+        for item in restored.get("resolved_scenes") or []:
+            entry = dict(item)
+            entry["asset_path"] = Path(entry["asset_path"]) if entry.get("asset_path") else None
+            resolved_scenes.append(entry)
+        assets = list(restored.get("assets") or [])
+        motion_plan = list(restored.get("motion_plan") or [])
+        storyboard_path = Path(str(restored.get("storyboard_path") or ""))
+        if not storyboard_path.is_file():
+            raise RuntimeError(f"render resume storyboard is missing: {storyboard_path}")
+        storyboard = json.loads(storyboard_path.read_text(encoding="utf-8"))
+        storyboard["json_path"] = str(storyboard_path)
+        print(
+            f"[resume] restored {len(resolved_scenes)} resolved scene(s); "
+            f"storyboard {storyboard.get('review_status')}"
+        )
+    else:
+        planner = visual_chain.plan_scenes(shots)
+        print(f"[visual] plan: up to {planner['stock_cap']} stock b-roll scene(s) of {planner['total']}")
 
-    evidence = dict(evidence or {})
-    cutout_plan: dict[int, dict] = {}
-    if evidence.get("ledger"):
-        from app.research import claims as claim_ledger
-        from app.visuals import cutouts as cutout_module
+        evidence = dict(evidence or {})
+        cutout_plan: dict[int, dict] = {}
+        if evidence.get("ledger"):
+            from app.research import claims as claim_ledger
+            from app.visuals import cutouts as cutout_module
 
-        scene_claims: dict[int, list[dict]] = {}
+            scene_claims: dict[int, list[dict]] = {}
+            for shot in shots:
+                index = int(shot.get("index", 0) or 0)
+                scene = (planner.get("scenes") or {}).get(index) or {}
+                narration = str(scene.get("narration") or shot.get("claim") or shot.get("caption") or "")
+                scene_claims[index] = claim_ledger.claims_for_scene(evidence["ledger"], narration)
+            selection = cutout_module.select_cutout_scenes(evidence["ledger"], scene_claims)
+            for entry in selection.get("selected") or []:
+                index = entry["scene_index"]
+                claim = next(
+                    (item for item in scene_claims.get(index, [])
+                     if item.get("claim_id") == entry["claim_id"]),
+                    None,
+                )
+                if not claim:
+                    continue
+                card = cutout_module.build_source_card(claim, work_dir)
+                if card.get("rendered"):
+                    cutout_plan[index] = card
+            evidence["scene_claims"] = scene_claims
+            evidence["cutouts"] = cutout_plan
+            evidence["cutout_selection"] = selection
+            rights = cutout_module.rights_gate(list(cutout_plan.values()))
+            evidence["rights_gate"] = rights
+            print(
+                f"[evidence] {len(cutout_plan)} source cutout(s) of {selection.get('budget', 0)} slot(s); "
+                f"rights gate: {rights['blocked']} blocked"
+            )
+
+        resolved_scenes: list[dict] = []
         for shot in shots:
             index = int(shot.get("index", 0) or 0)
-            scene = (planner.get("scenes") or {}).get(index) or {}
-            narration = str(scene.get("narration") or shot.get("claim") or shot.get("caption") or "")
-            scene_claims[index] = claim_ledger.claims_for_scene(evidence["ledger"], narration)
-        selection = cutout_module.select_cutout_scenes(evidence["ledger"], scene_claims)
-        for entry in selection.get("selected") or []:
-            index = entry["scene_index"]
-            claim = next(
-                (item for item in scene_claims.get(index, [])
-                 if item.get("claim_id") == entry["claim_id"]),
-                None,
-            )
-            if not claim:
-                continue
-            card = cutout_module.build_source_card(claim, work_dir)
-            if card.get("rendered"):
-                cutout_plan[index] = card
-        evidence["scene_claims"] = scene_claims
-        evidence["cutouts"] = cutout_plan
-        evidence["cutout_selection"] = selection
-        rights = cutout_module.rights_gate(list(cutout_plan.values()))
-        evidence["rights_gate"] = rights
-        print(
-            f"[evidence] {len(cutout_plan)} source cutout(s) of {selection.get('budget', 0)} slot(s); "
-            f"rights gate: {rights['blocked']} blocked"
-        )
+            cutout = cutout_plan.get(index)
+            if cutout:
+                # The excerpt replaces b-roll on this scene; the card carries its own
+                # publisher, date and URL attribution.
+                detail = {
+                    "provider": "source_cutout",
+                    "path": cutout.get("path", ""),
+                    "title": f"{cutout.get('claim_id', '')} source excerpt",
+                    "license": (cutout.get("reuse_rights") or {}).get("basis", ""),
+                    "credit_line": cutout.get("attribution", ""),
+                    "query": cutout.get("claim_id", ""),
+                    "visual_type": "image",
+                    "scene_type": "source_cutout",
+                    "relevance": "evidence",
+                    "relevance_confidence": "high",
+                    "claim_id": cutout.get("claim_id", ""),
+                }
+            else:
+                detail = visual_chain.resolve_scene(
+                    shot, work_dir, planner, used_titles=used_titles, dry_run=dry_run
+                )
+            asset_path = detail.get("path")
+            if asset_path and not Path(asset_path).exists():
+                asset_path = None
+            if detail.get("provider") and detail["provider"] != "procedural":
+                if detail.get("title"):
+                    used_titles.add(str(detail["title"]))
+                entry = {k: v for k, v in detail.items() if k != "path"}
+                entry["path"] = str(asset_path) if asset_path else ""
+                entry["credit_line"] = (stock_fetcher.credit_lines([detail]) or [""])[0]
+                assets.append(entry)
+            resolved_scenes.append({"shot": shot, "detail": detail, "asset_path": asset_path})
 
-    resolved_scenes: list[dict] = []
-    for shot in shots:
-        index = int(shot.get("index", 0) or 0)
-        cutout = cutout_plan.get(index)
-        if cutout:
-            # The excerpt replaces b-roll on this scene; the card carries its own
-            # publisher, date and URL attribution.
-            detail = {
-                "provider": "source_cutout",
-                "path": cutout.get("path", ""),
-                "title": f"{cutout.get('claim_id', '')} source excerpt",
-                "license": (cutout.get("reuse_rights") or {}).get("basis", ""),
-                "credit_line": cutout.get("attribution", ""),
-                "query": cutout.get("claim_id", ""),
-                "visual_type": "image",
-                "scene_type": "source_cutout",
-                "relevance": "evidence",
-                "relevance_confidence": "high",
-                "claim_id": cutout.get("claim_id", ""),
-            }
-        else:
-            detail = visual_chain.resolve_scene(
-                shot, work_dir, planner, used_titles=used_titles, dry_run=dry_run
-            )
-        asset_path = detail.get("path")
-        if asset_path and not Path(asset_path).exists():
-            asset_path = None
-        if detail.get("provider") and detail["provider"] != "procedural":
-            if detail.get("title"):
-                used_titles.add(str(detail["title"]))
-            entry = {k: v for k, v in detail.items() if k != "path"}
-            entry["path"] = str(asset_path) if asset_path else ""
-            entry["credit_line"] = (stock_fetcher.credit_lines([detail]) or [""])[0]
-            assets.append(entry)
-        resolved_scenes.append({"shot": shot, "detail": detail, "asset_path": asset_path})
-
-    print(f"[visual] {visual_chain.stock_summary(planner)}")
+        print(f"[visual] {visual_chain.stock_summary(planner)}")
 
     # Motion is planned after resolution because it depends on the scene type
     # and whether the chosen asset is video or a still.  A cut then starts at
-    # the scale the previous shot ended on.
-    motion_plan: list[dict] = []
-    try:
-        motion_plan = motion_director.assign_motion(
-            shots, [item["detail"] for item in resolved_scenes]
-        )
-        print(
-            "[motion] " + ", ".join(
-                f"s{item['index']:02d}:{item['profile']} "
-                f"{item['zoom_from']}->{item['zoom_to']}"
-                for item in motion_plan[:6]
+    # the scale the previous shot ended on.  A resume reuses the approved plan.
+    if resume_path is None:
+        motion_plan = []
+        try:
+            motion_plan = motion_director.assign_motion(
+                shots, [item["detail"] for item in resolved_scenes]
             )
-        )
-    except Exception as exc:
-        print(f"[motion] scene-aware plan failed ({type(exc).__name__}); using planned values")
+            print(
+                "[motion] " + ", ".join(
+                    f"s{item['index']:02d}:{item['profile']} "
+                    f"{item['zoom_from']}->{item['zoom_to']}"
+                    for item in motion_plan[:6]
+                )
+            )
+        except Exception as exc:
+            print(f"[motion] scene-aware plan failed ({type(exc).__name__}); using planned values")
 
     storyboard_gate = os.getenv("STORYBOARD_GATE", "require").strip().lower()
-    storyboard: dict = {"review_status": "disabled", "approved": False,
-                        "review_required": False, "review_reasons": []}
-    if storyboard_gate not in {"off", "skip"}:
-        from app.visuals.storyboard import build_storyboard, enforce_review_gate
-        storyboard = build_storyboard(
-            shots,
-            [item["detail"] for item in resolved_scenes],
-            work_dir,
-            planner=planner,
-            title=str(shots[0].get("title") or ""),
-            evidence=evidence or None,
-        )
-        print(
-            f"[storyboard] {storyboard['review_status']} "
-            f"({len(storyboard.get('scenes') or [])} scenes, "
-            f"{len(storyboard.get('review_reasons') or [])} reason(s))"
-        )
-        enforce_review_gate(storyboard, storyboard_gate)
+    if resume_path is not None:
+        if storyboard_gate not in {"off", "skip"}:
+            from app.visuals.storyboard import enforce_review_gate
+            enforce_review_gate(storyboard, storyboard_gate)
+    else:
+        storyboard = {"review_status": "disabled", "approved": False,
+                      "review_required": False, "review_reasons": []}
+        if storyboard_gate not in {"off", "skip"}:
+            from app.visuals.storyboard import build_storyboard, enforce_review_gate
+            storyboard = build_storyboard(
+                shots,
+                [item["detail"] for item in resolved_scenes],
+                work_dir,
+                planner=planner,
+                title=str(shots[0].get("title") or ""),
+                evidence=evidence or None,
+            )
+            print(
+                f"[storyboard] {storyboard['review_status']} "
+                f"({len(storyboard.get('scenes') or [])} scenes, "
+                f"{len(storyboard.get('review_reasons') or [])} reason(s))"
+            )
+            # Persist the plan before the gate can stop the run, so an approved
+            # storyboard can be resumed without re-resolving every asset.
+            plan_path = _write_render_plan(
+                work_dir, shots=shots, resolved_scenes=resolved_scenes,
+                planner=planner, assets=assets, motion_plan=motion_plan,
+                evidence=evidence, storyboard=storyboard,
+                width=width, height=height, fps=fps,
+            )
+            print(f"[storyboard] review plan: {plan_path}")
+            enforce_review_gate(storyboard, storyboard_gate)
+    if storyboard.get("human_approved"):
+        # Approval is bound to this exact contact sheet, script, ledger and
+        # scene digest. Keep the original semantic-review signal for audit,
+        # while telling final QA that a human explicitly accepted these assets.
+        for asset in assets:
+            asset["human_reviewed"] = True
+            asset["human_review_reviewer"] = "storyboard approval"
 
-    for item in resolved_scenes:
+    # The EDL is authored before picture rendering and becomes the execution input.
+    edit_decisions = build_edit_decisions(
+        resolved_scenes, motion_plan, fps=fps, width=width, height=height
+    )
+    edl_path = write_edl(work_dir / "edit_decisions.json", edit_decisions)
+    print(f"[edit] pre-render EDL: {edl_path} ({len(edit_decisions['clips'])} clips)")
+
+    for item, decision in zip(resolved_scenes, edit_decisions["clips"]):
         shot = item["shot"]
         asset_path = item["asset_path"]
         try:
-            shot_file = render_shot(
-                shot, asset_path, work_dir, fps=fps, width=width, height=height,
-                diagnostics=render_diagnostics,
+            shot_file = execute_clip(
+                decision, render_shot, shot, asset_path, work_dir,
+                fps=fps, width=width, height=height, diagnostics=render_diagnostics,
             )
-        except Exception:
-            if asset_path is None:
+        except Exception as exc:
+            if asset_path is None or "EDL source trim failed" in str(exc) or "failed visual QA" in str(exc) or "EDL execution QA" in str(exc):
                 raise
-            shot_file = render_shot(
-                shot, None, work_dir, fps=fps, width=width, height=height,
-                diagnostics=render_diagnostics,
+            shot_file = execute_clip(
+                decision, render_shot, shot, None, work_dir,
+                fps=fps, width=width, height=height, diagnostics=render_diagnostics,
             )
         if not shot_file.is_file() or shot_file.stat().st_size <= 1000:
             raise RuntimeError(f"shot {shot.get('index', '?')} produced no usable video segment")
@@ -226,6 +351,26 @@ def render_video(shots: list[dict], audio_path: Path, out_path: Path, *, work_di
             sfx_path = synthesize_sfx(kind, work_dir)
             if sfx_path:
                 sfx_timed.append((float(shot.get("start", 0.0)), sfx_path))
+
+    # Export the actual rendered scene sequence as an NLE hand-off. The
+    # authoritative JSON EDL retains original stock/source ranges; OTIO points
+    # to the exact rendered scene files so procedural/graphic scenes are not gaps.
+    try:
+        handoff_edl = json.loads(json.dumps(edit_decisions))
+        for clip, shot_file in zip(handoff_edl.get("clips") or [], shot_files):
+            duration = float((clip.get("timeline") or {}).get("duration_seconds") or 0.0)
+            clip["source"] = {
+                **(clip.get("source") or {}),
+                "path": str(Path(shot_file).resolve()),
+                "kind": "video", "in_seconds": 0.0, "out_seconds": duration,
+            }
+        handoff_path = export_edl_to_otio(handoff_edl, work_dir / "editorial_handoff.otio")
+        print(f"[edit] OpenTimelineIO hand-off: {handoff_path}")
+    except Exception as exc:
+        print(f"[edit] OpenTimelineIO export unavailable ({type(exc).__name__}); JSON EDL remains authoritative")
+
+    # Persist post-render measurements into the same authoritative EDL artifact.
+    write_edl(edl_path, edit_decisions)
     video_full = _concat_videos(shot_files, shots, work_dir)
 
     motion_sheet = ""
@@ -306,10 +451,14 @@ def render_video(shots: list[dict], audio_path: Path, out_path: Path, *, work_di
         caption_words_path=caption_words_path,
         motion_plan=motion_plan,
         storyboard=storyboard,
+        edit_decisions=edit_decisions,
         width=width,
         height=height,
         fps=fps,
     )
+    delivery_qa = validate_final_output(out_path, edit_decisions, timeline, fps=fps)
+    timeline["delivery_qa"] = delivery_qa
+    print(f"[edit] final delivery QA: {delivery_qa['status']} ({delivery_qa['actual_duration_seconds']:.3f}s, {delivery_qa['expected_frames']} frames)")
     timeline_path = write_timeline(work_dir / "timeline.json", timeline)
     print(f"[timeline] frame-accurate edit manifest: {timeline_path}")
 
@@ -366,6 +515,8 @@ def render_video(shots: list[dict], audio_path: Path, out_path: Path, *, work_di
         "motion": motion_plan,
         "motion_contact_sheet": motion_sheet,
         "timeline_path": str(timeline_path),
+        "edit_decisions_path": str(edl_path),
+        "delivery_qa": delivery_qa,
         "audio_boundaries": audio_boundaries,
         "evidence": {
             "linked": bool(evidence.get("ledger")),

@@ -7,15 +7,15 @@ provider chain with automatic fallback.
 
 Priority order
 --------------
-1. ``edge_tts``   - local, free, unlimited (Microsoft Edge neural voices).
-2. ``elevenlabs`` - free tier allows 10,000 characters per month.
-3. ``cartesia``   - free tier allows 20,000 credits.
-4. ``openai``     - paid (~0.015 USD/min), opt-in via ``TTS_PROVIDER=openai``.
-5. ``silent``     - local ffmpeg tone, always available, zero cost.
+1. ``edge_tts``    - free Microsoft Edge neural TTS service (network required).
+2. ``kokoro_local`` - local Kokoro-82M neural TTS; no API key or per-run cost.
+3. ``elevenlabs``  - optional hosted provider with a limited free tier.
+4. ``cartesia``    - optional hosted provider with a limited free tier.
+5. ``openai``      - paid; only used when explicitly configured.
+6. ``silent``      - diagnostic-only ffmpeg tone, never valid narration by default.
 
-Every provider is optional.  The chain walks the providers in priority order and
-degrades gracefully, so a missing API key can never break the pipeline.  The
-final ``silent`` stage guarantees that some valid mp3 always exists.
+Every provider is optional. The chain prefers free local synthesis before hosted
+providers. Silent output is diagnostic-only and is rejected as production narration.
 
 Configuration (``.env``)::
 
@@ -36,11 +36,14 @@ the next provider.
 from __future__ import annotations
 
 import argparse
+import fcntl
+import json
 import os
 import re
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 import requests
@@ -52,13 +55,15 @@ load_dotenv(ROOT / ".env", override=True)
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-PROVIDERS = ["edge_tts", "elevenlabs", "cartesia", "openai", "silent"]
+PROVIDERS = ["edge_tts", "kokoro_local", "gtts", "elevenlabs", "cartesia", "openai", "silent"]
 
 PROVIDER_ALIASES = {
     "edge": "edge_tts",
     "edge-tts": "edge_tts",
     "edge_tts_cli": "edge_tts",
     "edgetts": "edge_tts",
+    "kokoro": "kokoro_local",
+    "kokoro-js": "kokoro_local",
     "eleven": "elevenlabs",
     "eleven_labs": "elevenlabs",
     "11labs": "elevenlabs",
@@ -83,11 +88,14 @@ OPENAI_SPEECH_URL = "https://api.openai.com/v1/audio/speech"
 
 WORDS_PER_SECOND = 2.6
 MIN_DURATION = 1.0
-EDGE_TTS_TIMEOUT = 300
+EDGE_TTS_TIMEOUT = 30
 HTTP_TIMEOUT = 120
 FFMPEG_TIMEOUT = 300
 CONCAT_TIMEOUT = 600
+KOKORO_INFERENCE_TIMEOUT = 240
+KOKORO_LOCK_WAIT_SECONDS = 30
 CHUNK_SIZE = 1800
+KOKORO_CHUNK_SIZE = 320
 ELEVENLABS_MAX_CHARS = 5000
 
 # Edge TTS exposes only these three prosody controls.  Defaults are neutral so
@@ -189,6 +197,27 @@ def _find_ffmpeg() -> str | None:
     return None
 
 
+def _audio_peak_db(path: str | Path) -> float:
+    """Measure decoded audio peak; reject empty or effectively silent TTS output."""
+    ffmpeg = _find_ffmpeg()
+    if not ffmpeg:
+        raise RuntimeError("ffmpeg not found - cannot validate synthesized audio")
+    completed = subprocess.run(
+        [ffmpeg, "-hide_banner", "-i", str(path), "-af", "volumedetect", "-f", "null", "-"],
+        capture_output=True, text=True, timeout=FFMPEG_TIMEOUT,
+    )
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout or "").strip()
+        raise RuntimeError(f"audio validation failed: {detail[-400:]}")
+    match = re.search(r"max_volume:\s*(-?inf|-?\d+(?:\.\d+)?) dB", completed.stderr or "")
+    if not match:
+        raise RuntimeError("audio validation failed: ffmpeg did not report a measurable peak")
+    value = float("-inf") if match.group(1) == "-inf" else float(match.group(1))
+    if value <= -55.0:
+        raise RuntimeError(f"TTS output is silent or near-silent (peak {value:.1f} dBFS)")
+    return value
+
+
 def _find_ffprobe() -> str | None:
     """Locate the ffprobe binary."""
     for candidate_name in ("ffprobe", "ffprobe.exe"):
@@ -232,11 +261,16 @@ def provider_status() -> dict:
     cartesia_voice = bool(_env("CARTESIA_VOICE_ID"))
     openai_key = bool(_env("OPENAI_API_KEY"))
     ffmpeg_binary = _find_ffmpeg()
+    kokoro_status = _kokoro_runtime_status()
 
     return {
         "edge_tts": {
             "configured": bool(edge_binary),
             "detail": edge_binary or "not found - run './venv/bin/pip install edge-tts'",
+        },
+        "kokoro_local": {
+            "configured": kokoro_status["configured"],
+            "detail": kokoro_status["detail"],
         },
         "elevenlabs": {
             "configured": eleven_key,
@@ -523,6 +557,20 @@ def _synthesize_edge_tts(text: str, out_path: Path, voice: str | None = None,
         raise RuntimeError("edge-tts produced no audio file")
 
 
+def _synthesize_gtts(text: str, out_path: Path, voice: str | None = None,
+                    model: str | None = None) -> None:
+    """Free network fallback using the already-installed gTTS client.
+
+    It is intentionally below Edge/Kokoro in the chain and remains identifiable
+    in run metadata so a human can reject or replace the voice during review.
+    """
+    from gtts import gTTS
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    speech = gTTS(text=text, lang="en", tld="com", slow=False, timeout=(10, 45))
+    speech.save(str(out_path))
+
+
 def _synthesize_elevenlabs(text: str, out_path: Path, voice: str | None = None, model: str | None = None) -> None:
     """Render speech with ElevenLabs (free tier: 10,000 characters per month)."""
     api_key = _env("ELEVENLABS_API_KEY")
@@ -625,6 +673,130 @@ def _synthesize_openai(text: str, out_path: Path, voice: str | None = None, mode
     out_path.write_bytes(response.content)
 
 
+def _kokoro_runtime_status() -> dict:
+    """Check the configured offline Kokoro runtime without attempting network access."""
+    node = shutil.which("node")
+    js_entry = Path(_env("KOKORO_JS_ENTRY")) if _env("KOKORO_JS_ENTRY") else None
+    transformers_entry = Path(_env("KOKORO_TRANSFORMERS_ENTRY")) if _env("KOKORO_TRANSFORMERS_ENTRY") else None
+    cache_dir = Path(_env("KOKORO_MODEL_CACHE")) if _env("KOKORO_MODEL_CACHE") else None
+    model_id = _env("KOKORO_MODEL_ID", "onnx-community/Kokoro-82M-v1.0-ONNX")
+    voice_id = _env("KOKORO_VOICE", "am_fenrir")
+    model_path = cache_dir / model_id / "onnx" / "model_q4.onnx" if cache_dir else None
+    voice_path = js_entry.parent.parent / "voices" / f"{voice_id}.bin" if js_entry else None
+    missing = []
+    if not node:
+        missing.append("node executable")
+    if not js_entry or not js_entry.is_file():
+        missing.append("KOKORO_JS_ENTRY")
+    if not transformers_entry or not transformers_entry.is_file():
+        missing.append("KOKORO_TRANSFORMERS_ENTRY")
+    if not model_path or not model_path.is_file():
+        missing.append("cached Kokoro q4 model")
+    if not voice_path or not voice_path.is_file():
+        missing.append(f"Kokoro voice {voice_id}")
+    return {
+        "configured": not missing,
+        "detail": "local Kokoro runtime ready" if not missing else "missing " + ", ".join(missing),
+        "node": node,
+        "js_entry": str(js_entry) if js_entry else "",
+        "transformers_entry": str(transformers_entry) if transformers_entry else "",
+        "cache_dir": str(cache_dir) if cache_dir else "",
+        "model_id": model_id,
+        "voice": voice_id,
+    }
+
+
+def _synthesize_kokoro_local(text: str, out_path: Path, voice: str | None = None,
+                             model: str | None = None) -> None:
+    """Generate neural narration offline with the configured local Kokoro-82M model."""
+    status = _kokoro_runtime_status()
+    if not status["configured"]:
+        raise RuntimeError(f"local Kokoro is not ready: {status['detail']}")
+    script_path = ROOT / "app" / "voice" / "kokoro_local.mjs"
+    if not script_path.is_file():
+        raise RuntimeError(f"Kokoro runner is missing: {script_path}")
+
+    voice_id = voice if voice and not voice.lower().startswith("en-") else status["voice"]
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    chunks = chunk_text(text, KOKORO_CHUNK_SIZE)
+    if not chunks:
+        raise RuntimeError("Kokoro received empty narration text")
+    ffmpeg = _find_ffmpeg()
+    if not ffmpeg:
+        raise RuntimeError("ffmpeg not found - cannot encode Kokoro output")
+
+    with tempfile.TemporaryDirectory(prefix="nextdecode_kokoro_", dir=str(out_path.parent)) as temp_dir:
+        temp_root = Path(temp_dir)
+        chunk_paths = [temp_root / f"chunk_{index:03d}.wav" for index in range(len(chunks))]
+        payload = {
+            "chunks": chunks,
+            "output_dir": str(temp_root),
+            "voice": voice_id,
+            "speed": float(_env("KOKORO_SPEED", "1.45")),
+            "model_id": model or status["model_id"],
+        }
+        lock_path = ROOT / "data" / "cache" / "kokoro_inference.lock"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with lock_path.open("a+") as lock_handle:
+            deadline = time.monotonic() + KOKORO_LOCK_WAIT_SECONDS
+            while True:
+                try:
+                    fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError("Kokoro inference lock remained busy; another run may be stuck")
+                    time.sleep(0.25)
+            try:
+                inference_timeout = max(
+                    30, min(600, int(_env("KOKORO_INFERENCE_TIMEOUT", str(KOKORO_INFERENCE_TIMEOUT))))
+                )
+                completed = subprocess.run(
+                    [status["node"], str(script_path)],
+                    input=json.dumps(payload), capture_output=True, text=True,
+                    timeout=inference_timeout,
+                )
+            except subprocess.TimeoutExpired as exc:
+                raise RuntimeError(
+                    f"Kokoro inference timed out after {inference_timeout}s; lock released for recovery"
+                ) from exc
+            finally:
+                fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+        if completed.returncode != 0:
+            detail = (completed.stderr or completed.stdout or "").strip()
+            raise RuntimeError(f"Kokoro local inference failed: {detail[-600:]}")
+        missing = [path.name for path in chunk_paths if not path.is_file() or path.stat().st_size == 0]
+        if missing:
+            raise RuntimeError("Kokoro did not produce all narration chunks: " + ", ".join(missing))
+
+        wav_path = temp_root / "combined.wav"
+        listing = temp_root / "chunks.txt"
+        listing.write_text(
+            "".join(f"file '{path.as_posix()}'\n" for path in chunk_paths),
+            encoding="utf-8",
+        )
+        combined = subprocess.run(
+            [ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-f", "concat",
+             "-safe", "0", "-i", str(listing), "-ac", "1", "-ar", "24000",
+             "-c:a", "pcm_s16le", str(wav_path)],
+            capture_output=True, text=True, timeout=CONCAT_TIMEOUT,
+        )
+        if combined.returncode != 0 or not wav_path.is_file() or wav_path.stat().st_size == 0:
+            detail = (combined.stderr or combined.stdout or "").strip()
+            raise RuntimeError(f"could not concatenate Kokoro WAV chunks: {detail[-500:]}")
+
+        encoded = subprocess.run(
+            [ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-i", str(wav_path),
+             "-vn", "-ac", "1", "-ar", "24000", "-c:a", "libmp3lame", "-b:a", "192k", str(out_path)],
+            capture_output=True, text=True, timeout=FFMPEG_TIMEOUT,
+        )
+        if encoded.returncode != 0:
+            detail = (encoded.stderr or encoded.stdout or "").strip()
+            raise RuntimeError(f"ffmpeg could not encode Kokoro audio: {detail[-500:]}")
+        if not out_path.is_file() or out_path.stat().st_size == 0:
+            raise RuntimeError("Kokoro chunk concatenation produced no MP3 output")
+
+
 def _synthesize_silent(text: str, out_path: Path, voice: str | None = None, model: str | None = None) -> None:
     """Render a silent mp3 of the right length with ffmpeg (always available)."""
     ffmpeg = _find_ffmpeg()
@@ -651,6 +823,8 @@ def _synthesize_silent(text: str, out_path: Path, voice: str | None = None, mode
 
 _SYNTHESIZERS = {
     "edge_tts": _synthesize_edge_tts,
+    "kokoro_local": _synthesize_kokoro_local,
+    "gtts": _synthesize_gtts,
     "elevenlabs": _synthesize_elevenlabs,
     "cartesia": _synthesize_cartesia,
     "openai": _synthesize_openai,
@@ -666,10 +840,22 @@ def _default_provider() -> str:
 
 
 def _provider_chain(preferred: str | None = None) -> list[str]:
-    """Build the ordered provider chain, honouring an explicit preference."""
+    """Build the ordered narration chain without silently degrading by default.
+
+    Silent output is a diagnostic fallback, not valid narration. It is included
+    only when explicitly enabled with TTS_ALLOW_SILENT_FALLBACK=true.
+    """
     name = _normalize_provider(preferred) if preferred else _normalize_provider(_env("TTS_PROVIDER"))
-    chain = list(PROVIDERS)
-    if name and name in chain:
+    allow_silent = _env("TTS_ALLOW_SILENT_FALLBACK").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+    chain = [provider for provider in PROVIDERS if provider != "silent" or allow_silent]
+    if _env("TTS_ALLOW_LOCAL_MODELS").lower() not in {"1", "true", "yes", "on"}:
+        chain = [provider for provider in chain if provider != "kokoro_local"]
+    if name == "silent" and allow_silent:
+        chain.remove("silent")
+        chain.insert(0, "silent")
+    elif name and name in chain:
         chain.remove(name)
         chain.insert(0, name)
     return chain
@@ -707,6 +893,13 @@ def synthesize(
                 hint,
             )
 
+    if name == "kokoro_local" and _env("TTS_ALLOW_LOCAL_MODELS").lower() not in {"1", "true", "yes", "on"}:
+        return _result(
+            None, name,
+            "Local TTS models are disabled by TTS_ALLOW_LOCAL_MODELS; select a hosted/free network provider.",
+            hint,
+        )
+
     if not (text or "").strip():
         return _result(None, name, "Refusing to synthesize empty text.", hint)
 
@@ -727,7 +920,14 @@ def synthesize(
             pass
         return _result(None, name, error, hint, degraded=(name == "silent"))
 
-    return _result(target.resolve(), name, None, hint, degraded=(name == "silent"))
+    try:
+        peak_db = _audio_peak_db(target)
+        if peak_db <= -55.0:
+            raise RuntimeError(f"TTS output is silent or near-silent (peak {peak_db:.1f} dBFS)")
+    except Exception as exc:  # noqa: BLE001 - invalid audio must not enter the pipeline
+        return _result(None, name, f"Invalid synthesized audio: {exc}", hint, degraded=True)
+    return _result(target.resolve(), name, None, hint, degraded=(name == "silent"),
+                   audio_peak_db=peak_db)
 
 
 def synthesize_with_fallback(
@@ -756,11 +956,15 @@ def synthesize_with_fallback(
         else:
             # A Microsoft voice id is not valid for the hosted providers.
             result = synthesize(text, target, provider=name)
-        if result.get("path"):
+        if result.get("path") and not result.get("degraded"):
             result["chain"] = chain
             return result
         last_provider = name
-        errors.append(f"{name}: {result.get('error')}")
+        reason = result.get("error") or (
+            "provider returned degraded audio; not accepted as narration"
+            if result.get("degraded") else "provider returned no output path"
+        )
+        errors.append(f"{name}: {reason}")
 
     return _result(
         None,

@@ -73,6 +73,30 @@ def _shots(count: int, duration: float) -> list[dict]:
 
 
 class ShortClipDurationTests(unittest.TestCase):
+    def test_ffmpeg_failure_preserves_bounded_stderr_diagnostic(self):
+        completed = subprocess.CompletedProcess(
+            args=["ffmpeg"], returncode=1, stdout="", stderr="Invalid data found when processing input"
+        )
+        with patch("app.render.ffmpeg_tools.subprocess.run", return_value=completed):
+            with self.assertRaisesRegex(RuntimeError, "ffmpeg exited with code 1") as caught:
+                ffmpeg_tools._run(["ffmpeg", "-i", "private/path.mp4"])
+        self.assertIn("Invalid data found", str(caught.exception))
+        self.assertNotIn("private/path.mp4", str(caught.exception))
+
+    @unittest.skipUnless(HAS_FFMPEG, "ffmpeg/ffprobe required")
+    def test_human_reviewed_semantic_flag_does_not_fail_strict_visual_qa(self):
+        with tempfile.TemporaryDirectory() as td:
+            video = _make_video(Path(td) / "reviewed.mp4", duration=1.2)
+            result = ffmpeg_tools.qa_video(
+                video, width=360, height=640, min_duration=1.0, max_duration=2.0,
+                expected_fps=30, silence_db=None, assets=[{
+                    "asset_id": "pixabay:reviewed", "relevance_confidence": "medium",
+                    "semantic_review": True, "human_reviewed": True,
+                }], strict_visuals=True,
+            )
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["assets"]["semantic_review"], 0)
+
     @unittest.skipUnless(HAS_FFMPEG, "ffmpeg/ffprobe required")
     def test_short_video_is_looped_to_fill_the_shot(self):
         from app.render.shots import render_shot
@@ -88,6 +112,62 @@ class ShortClipDurationTests(unittest.TestCase):
             duration = float(ffmpeg_tools._probe_duration(out))
         self.assertGreaterEqual(duration, 2.4)
         self.assertLessEqual(duration, 2.7)
+
+
+class AbsoluteFrameAllocationTests(unittest.TestCase):
+    def test_fractional_shots_sum_to_exact_absolute_timeline_frames(self):
+        from app.render.shots import render_shot
+
+        with tempfile.TemporaryDirectory() as td:
+            work = Path(td)
+            image = work / "still.jpg"
+            image.write_bytes(b"fixture")
+            captured = []
+            duration = 45.0
+            count = 14
+
+            def fake_run(command, *args, **kwargs):
+                captured.append(int(command[command.index("-frames:v") + 1]))
+                Path(command[-1]).write_bytes(b"x" * 2048)
+
+            with patch("app.render.shots._run", side_effect=fake_run):
+                for index in range(count):
+                    shot = {
+                        "index": index,
+                        "start": duration * index / count,
+                        "end": duration * (index + 1) / count,
+                        "duration": duration / count,
+                        "motion": {"mode": "native", "zoom_from": 1.0, "zoom_to": 1.0},
+                    }
+                    render_shot(shot, image, work, fps=30, width=64, height=64)
+
+        self.assertEqual(len(captured), count)
+        self.assertEqual(sum(captured), 1350)
+
+    def test_render_shot_uses_absolute_start_end_frame_allocation(self):
+        from app.render.shots import render_shot
+
+        with tempfile.TemporaryDirectory() as td:
+            work = Path(td)
+            image = work / "still.jpg"
+            image.write_bytes(b"fixture")
+            captured = {}
+
+            def fake_run(command, *args, **kwargs):
+                captured["command"] = command
+                Path(command[-1]).write_bytes(b"x" * 2048)
+
+            shot = {
+                "index": 7, "start": 0.001, "end": 0.017,
+                "duration": 0.016,
+                "motion": {"mode": "native", "zoom_from": 1.0, "zoom_to": 1.0},
+            }
+            with patch("app.render.shots._run", side_effect=fake_run):
+                render_shot(shot, image, work, fps=30)
+
+        command = captured["command"]
+        self.assertEqual(command[command.index("-frames:v") + 1], "1")
+        self.assertEqual(command[command.index("-t") + 1], str(1 / 30))
 
 
 class MixFilterTests(unittest.TestCase):
@@ -324,7 +404,7 @@ class RenderAssemblyTests(unittest.TestCase):
         self.assertEqual(result["audio_settings"]["delivery_bitrate"], "320k")
         self.assertFalse(result["audio_settings"]["music_bed"])
         self.assertEqual(len(result["scene_briefs"]), 2)
-        self.assertEqual(result["provider_counts"].get("gradient"), 2)
+        self.assertEqual(result["provider_counts"].get("motion_graphic"), 2)
         self.assertEqual(len(result["fallback_scenes"]), 2)
         self.assertTrue(all(item["fallback_reason"] for item in result["fallback_scenes"]))
         self.assertIn("storyboard", result)
@@ -370,6 +450,20 @@ class RenderAssemblyTests(unittest.TestCase):
                     work_dir=self.dir / "work_caption_failure",
                     ass_path=_write_ass(self.dir / "burn-failure.ass", end=2.3),
                 )
+
+    def test_production_rejects_nonblocking_storyboard_mode_before_asset_resolution(self):
+        from app.render import assembly
+
+        with (
+            patch.dict(os.environ, {"DRY_RUN": "0", "STORYBOARD_GATE": "warn"}),
+            patch.object(assembly.visual_chain, "plan_scenes") as plan_scenes,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "production render requires STORYBOARD_GATE=require"):
+                assembly.render_video(
+                    _shots(1, 2.4), self._audio(2.4), self.dir / "unsafe.mp4",
+                    work_dir=self.dir / "work_unsafe",
+                )
+        plan_scenes.assert_not_called()
 
     def test_storyboard_require_gate_blocks_before_render(self):
         from app.render import assembly

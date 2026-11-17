@@ -68,8 +68,10 @@ def test_stale_worker_cannot_finish_claimed_task(tmp_path):
     store = TaskStore(tmp_path / "tasks.db")
     task = store.enqueue(TaskRequest("test.echo"))
     store.claim("worker-a")
+    # worker-a holds attempt 1; worker-b presents that same current attempt
+    # number but is not the lease owner, so the finish fence must refuse.
     with pytest.raises(RuntimeError):
-        store.finish(task["task_id"], "worker-b", TaskResult("succeeded"))
+        store.finish(task["task_id"], "worker-b", TaskResult("succeeded"), attempt=1)
 
 
 def test_generation_capability_blocks_non_dry_run_before_process_start(monkeypatch):
@@ -141,10 +143,6 @@ def test_autonomy_mode_overrides_dotenv_provider_preferences(monkeypatch):
     monkeypatch.setenv("AI_PROVIDER_CHAIN", "gemini,groq")
     monkeypatch.setattr(multi_model_ai, "_exhausted_providers", set())
     monkeypatch.setattr(
-        multi_model_ai, "call_ollama",
-        lambda *args, **kwargs: '{"provider":"ollama"}',
-    )
-    monkeypatch.setattr(
         multi_model_ai, "call_gemini",
         lambda *args, **kwargs: pytest.fail("hosted Gemini must not be called"),
     )
@@ -153,10 +151,11 @@ def test_autonomy_mode_overrides_dotenv_provider_preferences(monkeypatch):
         lambda *args, **kwargs: pytest.fail("hosted Groq must not be called"),
     )
 
-    assert multi_model_ai._provider_order() == ["ollama"]
-    assert multi_model_ai.generate_json("test", temperature=0, timeout=1) == {
-        "provider": "ollama"
-    }
+    # Ollama was retired; autonomy/local-only mode must fail closed rather
+    # than silently falling back to hosted providers.
+    assert multi_model_ai._provider_order() == []
+    with pytest.raises(RuntimeError, match="no providers are configured"):
+        multi_model_ai.generate_json("test", temperature=0, timeout=1)
 
 
 
@@ -271,7 +270,8 @@ def test_recursive_dependency_failure_blocks_all_descendants(tmp_path):
     worker_id = "recursive-failure-worker"
     claimed = store.claim(worker_id)
     assert claimed["task_id"] == first
-    store.finish(first, worker_id, TaskResult("failed", error_code="root_failure"))
+    store.finish(first, worker_id, TaskResult("failed", error_code="root_failure"),
+                 attempt=claimed["attempts"])
     assert store.claim("no-eligible-task") is None
     assert store.get(second)["status"] == "blocked"
     assert store.get(third)["status"] == "blocked"

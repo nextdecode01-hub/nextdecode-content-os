@@ -259,11 +259,32 @@ def _recent_titles(path: Path):
     return [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()][-100:]
 
 
-def discover_topics(used_topics_file: Path | None = None, limit: int = 6):
-    """Collect current AI/tech angles; one failed source never blocks other sources."""
+def discover_topics(used_topics_file: Path | None = None, limit: int = 12):
+    """Discover stories across editorial categories; rotate away from recent topic families."""
+    from app.research.topic_diversity import annotate_and_diversify
+
     used = _recent_titles(used_topics_file or (PROJECT_ROOT / "data" / "used_topics.txt"))
-    jobs = [_fetch_hacker_news, _fetch_arxiv, _fetch_trends]
-    jobs.extend(lambda name=name: _fetch_reddit(name) for name in ("technology", "MachineLearning", "artificial"))
+    jobs = [_fetch_trends]
+    # Retain technical/science discovery, but no longer let it dominate the channel.
+    jobs.extend([_fetch_hacker_news, _fetch_arxiv])
+    jobs.extend(lambda name=name: _fetch_reddit(name) for name in (
+        "technology", "science", "worldnews", "business", "history", "space",
+        "nature", "sports", "Documentaries", "todayilearned",
+    ))
+    # Broad editorial queries bring in real-world stories beyond AI and technology.
+    editorial_queries = (
+        "major science discoveries research experiment",
+        "world events geopolitics investigation",
+        "business economy companies market",
+        "history archaeology mystery discovery",
+        "wildlife nature environment climate",
+        "space astronomy NASA discovery",
+        "human stories survival achievement",
+        "culture entertainment film music",
+        "sports records competition",
+        "consumer society products hidden systems",
+    )
+    jobs.extend(lambda query=query: search_related_news(query, limit=6) for query in editorial_queries)
     collected = []
     with ThreadPoolExecutor(max_workers=6) as pool:
         futures = [pool.submit(job) for job in jobs]
@@ -275,9 +296,9 @@ def discover_topics(used_topics_file: Path | None = None, limit: int = 6):
     unique = {}
     for entry in collected:
         norm = re.sub(r"[^a-z0-9]+", " ", entry["title"].lower()).strip()
-        if not norm or any(SequenceMatcher(None, norm, re.sub(r"[^a-z0-9]+", " ", old.lower()).strip()).ratio() >= 0.76 for old in used):
+        if not norm:
             continue
         if norm not in unique or entry["rank"] > unique[norm]["rank"]:
             unique[norm] = entry
     ranked = sorted(unique.values(), key=lambda item: (item["rank"], item["published"]), reverse=True)
-    return ranked[:limit]
+    return annotate_and_diversify(ranked, used, limit=limit)

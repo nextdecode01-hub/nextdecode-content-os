@@ -1,0 +1,150 @@
+{
+  "schema": "nextdecode.model-task-routing.v1",
+  "version": 1,
+  "status": "constrained_candidate_routing",
+  "selection_policy": {
+    "candidate_count": 4,
+    "automatic_role_promotion": false,
+    "fallback_only_within_task_role": true,
+    "require_exact_model": true,
+    "candidate_pool_count": 10,
+    "qualification_required": true
+  },
+  "tasks": {
+    "research_synthesis": {
+      "primary": {
+        "provider": "groq",
+        "model": "qwen/qwen3.8-27b"
+      },
+      "fallbacks": [
+        {
+          "provider": "groq",
+          "model": "openai/gpt-oss-120b"
+        }
+      ]
+    },
+    "script_drafting": {
+      "primary": {
+        "provider": "groq",
+        "model": "openai/gpt-oss-120b"
+      },
+      "fallbacks": [
+        {
+          "provider": "nvidia",
+          "model": "nvidia/nemotron-3.5-lightning-30b-a3b"
+        },
+        {
+          "provider": "groq",
+          "model": "qwen/qwen3.8-27b"
+        }
+      ]
+    },
+    "script_review": {
+      "primary": {
+        "provider": "groq",
+        "model": "openai/gpt-oss-120b"
+      },
+      "fallbacks": [
+        {
+          "provider": "nvidia",
+          "model": "nvidia/nemotron-3.5-lightning-30b-a3b"
+        },
+        {
+          "provider": "groq",
+          "model": "qwen/qwen3.8-27b"
+        }
+      ]
+    },
+    "evidence_extraction": {
+      "primary": {
+        "provider": "nvidia",
+        "model": "nvidia/nemotron-3.5-bolt-e4b"
+      },
+      "fallbacks": [
+        {
+          "provider": "groq",
+          "model": "openai/gpt-oss-20b"
+        },
+        {
+          "provider": "groq",
+          "model": "openai/gpt-oss-120b"
+        },
+        {
+          "provider": "groq",
+          "model": "qwen/qwen3.8-27b"
+        }
+      ]
+    },
+    "visual_plan": {
+      "primary": {
+        "provider": "groq",
+        "model": "openai/gpt-oss-120b"
+      },
+      "fallbacks": [
+        {
+          "provider": "groq",
+          "model": "qwen/qwen3.8-27b"
+        }
+      ]
+    },
+    "visual_qa": {
+      "enabled": false,
+      "qualification_required": true,
+      "blocked_reason": "Nemotron Super VL has not passed project contact-sheet and sampled-video-frame qualification.",
+      "primary": null,
+      "fallbacks": []
+    },
+    "fast_classification": {
+      "primary": {
+        "provider": "groq",
+        "model": "openai/gpt-oss-20b"
+      },
+      "fallbacks": [
+        {
+          "provider": "groq",
+          "model": "qwen/qwen3.8-27b"
+        },
+        {
+          "provider": "groq",
+          "model": "openai/gpt-oss-120b"
+        }
+      ]
+    },
+    "metadata_transform": {
+      "primary": {
+        "provider": "groq",
+        "model": "openai/gpt-oss-20b"
+      },
+      "fallbacks": [
+        {
+          "provider": "groq",
+          "model": "qwen/qwen3.8-27b"
+        }
+      ]
+    },
+    "general_fallback": {
+      "primary": {
+        "provider": "groq",
+        "model": "openai/gpt-oss-120b"
+      },
+      "fallbacks": [
+        {
+          "provider": "groq",
+          "model": "qwen/qwen3.8-27b"
+        }
+      ]
+    }
+  },
+  "reserve_candidates": [
+    {
+      "provider": "gemini",
+      "model": "gemini-flash-latest",
+      "reason": "Alias may change independently; retain as reserve pending exact-model qualification"
+    },
+    {
+      "provider": "nvidia",
+      "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+      "reason": "Slower candidate; retain as complex reasoning reserve"
+    }
+  ]
+}

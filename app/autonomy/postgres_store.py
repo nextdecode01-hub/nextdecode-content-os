@@ -494,6 +494,17 @@ class PostgresTaskStore:
             ).fetchall()
             return [dict(row) for row in rows]
 
+    def recent_event_feed(self, limit: int = 100) -> list[dict]:
+        """Return the newest bounded lifecycle event window in chronological order."""
+        bounded_limit = max(1, min(int(limit), 500))
+        with self._connect() as db:
+            rows = db.execute(
+                """SELECT event_id,task_id,at,event,detail_json
+                   FROM task_events ORDER BY event_id DESC LIMIT %s""",
+                (bounded_limit,),
+            ).fetchall()
+            return list(reversed(rows))
+
     def dependency_results(self, task_id: str) -> list[dict]:
         """Return bounded, successful prerequisite outputs for downstream handlers."""
         with self._connect() as db:

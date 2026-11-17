@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import math
 import os
+
+from app.visuals import creative_director
 from pathlib import Path
 
 SAFE_ZONE_TOP = 0.10
@@ -21,7 +23,7 @@ MAX_SHOT_DURATION = 2.9
 MIN_SHOTS = 8
 DEFAULT_DURATION = 30.0
 
-SOURCES = ("pexels", "pixabay", "wikimedia", "ai_image", "procedural", "demo")
+SOURCES = ("coverr", "pixabay", "wikimedia", "ai_image", "procedural", "demo")
 SFX_KINDS = ("whoosh", "impact", "riser", "none")
 
 HOOK_KEYWORDS = ("hook", "open", "intro", "attention", "listen")
@@ -140,8 +142,8 @@ def _available_sources() -> list[str]:
     ordered: list[str] = []
     if _DEMO_VIDEO_PATH and Path(_DEMO_VIDEO_PATH).is_file():
         ordered.append("demo")
-    if os.getenv("PEXELS_API_KEY", "").strip():
-        ordered.append("pexels")
+    if os.getenv("COVERR_API_KEY", "").strip():
+        ordered.append("coverr")
     if os.getenv("PIXABAY_API_KEY", "").strip():
         ordered.append("pixabay")
     ordered.append("wikimedia")
@@ -250,6 +252,28 @@ def assign_motion(shots: list[dict], details: list[dict] | None = None, *,
                 pan0 = (round(px0, 1), round(py0, 1))
                 pan1 = (round(px1, 1), round(py1, 1))
 
+            # Execute the creative director's camera movement on still/graphic
+            # scenes; native stock video retains its real camera movement.
+            camera_move = str(shot.get("camera_movement") or "").lower()
+            if camera_move == "locked_off":
+                z0 = z1 = 1.0
+                pan0 = pan1 = (0.0, 0.0)
+            elif camera_move == "slow_push_in":
+                z0, z1 = 1.0, max(high, 1.10)
+            elif camera_move == "slow_pull_back":
+                z0, z1 = max(high, 1.10), 1.0
+            elif camera_move == "lateral_dolly":
+                z0 = z1 = max(high, 1.06)
+                pan0, pan1 = (-amplitude, 0.0), (amplitude, 0.0)
+            elif camera_move == "slow_drift":
+                z0, z1 = 1.02, max(high, 1.06)
+                pan0, pan1 = (0.0, -amplitude / 2.0), (0.0, amplitude / 2.0)
+            elif camera_move == "subtle_handheld":
+                z0, z1 = 1.02, 1.05
+                pan0, pan1 = (-amplitude / 4.0, 0.0), (amplitude / 4.0, 0.0)
+            elif camera_move == "rack_focus_simulated":
+                z0, z1 = 1.03, max(high, 1.08)
+
         motion = {
             "profile": profile_name,
             "mode": profile["mode"],
@@ -310,6 +334,13 @@ def plan_shots(script: dict, *, audio_duration: float | None = None) -> list[dic
     if not beats:
         duration = float(audio_duration or DEFAULT_DURATION)
         return [_single_shot(0, 0.0, duration, script)]
+
+    story_format = str(script.get("story_format") or os.getenv("NEXTDECODE_STORY_FORMAT", "auto")).strip().lower()
+    visual_style = str(script.get("visual_style") or os.getenv("NEXTDECODE_VISUAL_STYLE", "auto")).strip().lower()
+    beats = creative_director.direct_shots(
+        beats, topic=str(script.get("topic") or script.get("title") or "short"),
+        story_format=story_format, visual_style=visual_style,
+    )
 
     if audio_duration is None:
         audio_duration = _estimate_duration_from_beats(beats)
@@ -373,6 +404,24 @@ def plan_shots(script: dict, *, audio_duration: float | None = None) -> list[dic
             "transition": "fade" if i in (0, count - 1) else "cut",
             "sfx": _pick_sfx(i, text, count),
             "music_gain_db": gain,
+            "story_format": str(beat.get("story_format") or story_format),
+            "visual_style": str(beat.get("visual_style") or visual_style),
+            "visual_family": str(beat.get("visual_family") or "real_footage"),
+            "shot_size": str(beat.get("shot_size") or "medium"),
+            "camera_angle": str(beat.get("camera_angle") or "eye_level"),
+            "camera_movement": str(beat.get("camera_movement") or "slow_push_in"),
+            "camera_instruction": str(beat.get("camera_instruction") or ""),
+            "lighting_direction": str(beat.get("lighting_direction") or ""),
+            "composition_direction": str(beat.get("composition_direction") or ""),
+            "editing_rhythm": str(beat.get("editing_rhythm") or "motivated_fast_cuts"),
+            "transition_intent": str(beat.get("transition_intent") or "cut"),
+            "continuity_group": str(beat.get("continuity_group") or ""),
+            "editorial_reason": str(beat.get("editorial_reason") or ""),
+            # Explicitly selected generated clips flow through the normal resolver.
+            # Generation itself is never initiated by the renderer.
+            **({"generated_video_asset": str(beat.get("generated_video_asset") or "").strip()}
+               if isinstance(beat, dict) and str(beat.get("generated_video_asset") or "").strip()
+               else {}),
         })
     return shots
 

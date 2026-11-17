@@ -89,10 +89,10 @@ def _select_topic(research: list[dict], requested_topic: str = "") -> tuple[dict
         for index, item in enumerate(candidates)
     ]
     prompt = f"""
-You are the commissioning editor for NEXTDECODE, a channel explaining AI and technology to curious non-experts.
+You are the commissioning editor for NEXTDECODE. Its audience promise is to decode important changes in AI, technology, startups, business, economics, markets, industries and the future. Adjacent subjects are welcome only when they have a clear, evidence-backed connection to technology, business, digital systems, innovation, industry or economic consequences. Do not select unrelated general history, wildlife, sports, celebrity entertainment or generic geopolitics merely for views.
 Choose exactly one candidate from the supplied research list. Do not invent audience analytics, search volume, or virality.
 Compare candidates on:
-- viewer relevance: clear consequence or practical value for a broad tech-curious viewer;
+- viewer relevance: clear consequence, human significance or practical value for a broadly curious viewer;
 - current interest: freshness and observed engagement/source signals only;
 - evidence quality: how concrete and attributable the supplied source is;
 - originality: a non-generic explanation angle;
@@ -343,7 +343,7 @@ def generate_script(topic: str = "", research_candidates: list[dict] | None = No
         for index in range(4)
     )
     prompt = f"""
-You are an experienced documentary-style YouTube writer for NEXTDECODE, an English-language AI and technology channel.
+You are an experienced documentary-style YouTube writer for NEXTDECODE, an English-language channel covering science, world events, business, history, nature, space, human stories, culture, sports, investigations and technology.
 Audience: {selection['audience']}
 Selected topic: {selected['title']}
 Editorial angle: {selection['story_angle']}
@@ -374,8 +374,11 @@ fewer and explain the evidence_gap; the pipeline will reject the script rather t
 
 Create exactly four chapters. Their start_seconds must be strictly increasing, the first is 0, and all are
 before {PROFILE['minutes'] * 60} seconds; approximate starts are {chapter_markers}. Give each chapter a
-distinct 2-7-word landscape B-roll query and visual_type chosen from network, process, comparison, timeline,
-or evidence. Prefer shots that can be found as free licensed stock, not vague abstract AI imagery.
+distinct 2-7-word visual query and visual_type chosen for the story: real_event_footage, original_speech,
+natural_sound, primary_document, licensed_stock, archival_photo, existing_gif, generated_image,
+custom_animation, motion_graphic, map, process, comparison, timeline or evidence. Prefer authentic,
+licensed, source-specific footage and original voices where available and relevant. Use animation only when
+it communicates something real footage cannot show. Keep rights and attribution requirements explicit.
 
 Return only valid JSON with exactly these fields:
 {{
